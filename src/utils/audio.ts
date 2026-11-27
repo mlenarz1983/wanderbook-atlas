@@ -51,7 +51,13 @@ export function playClick(enabled: boolean) {
 export function playFly(enabled: boolean) {
   if (!enabled) return;
   const notes = [392, 440, 523.25, 659.25];
-  notes.forEach((n, i) => playTone(n, i * 0.08, 0.24, 0.085, 'sine'));
+  notes.forEach((n, i) => playTone(n, i * 0.11, 0.34, 0.085, 'sine'));
+}
+
+export function playLandingChime(enabled: boolean) {
+  if (!enabled) return;
+  const notes = [587.33, 659.25, 783.99];
+  notes.forEach((n, i) => playTone(n, i * 0.09, 0.28, 0.085, 'triangle'));
 }
 
 export function playGentleNudge(enabled: boolean) {

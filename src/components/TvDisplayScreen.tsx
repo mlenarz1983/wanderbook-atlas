@@ -6,6 +6,7 @@ import type { LiveSessionState } from '../types/game';
 import { generateRoomCode, startTvHost } from '../utils/tvSync';
 import { AnimalAvatar } from './art/AnimalAvatar';
 import { BalloonEmblem } from './art/CompassRose';
+import { FLIGHT_DURATION_MS, FlightJourneyCard } from './FlightJourneyCard';
 import { TimeFlipPostcard } from './TimeFlipPostcard';
 import { WorldAtlasMap } from './WorldAtlasMap';
 
@@ -339,18 +340,21 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
           </div>
         )}
 
-      {/* PAIRED: EXPEDITION — FLYING */}
+      {/* PAIRED: EXPEDITION — FLYING (7.5s STORYBOOK VOYAGE) */}
       {controllerConnected &&
         liveState?.screen === 'expedition' &&
         liveState.turnPhase === 'flying' &&
         pendingDest && (
-          <div className="tv-floating-card tv-stage-panel" style={{ textAlign: 'center' }}>
-            <div className="stamp-label" style={{ color: 'var(--terracotta)' }}>
-              {pendingDest.routeLabel.toUpperCase()}
-            </div>
-            <h2 style={{ fontSize: '2rem', marginTop: 4 }}>
-              Flying to {pendingDest.name}, {pendingDest.country}!
-            </h2>
+          <div className="tv-stage-panel" style={{ padding: 0 }}>
+            <FlightJourneyCard
+              fromDest={
+                (liveState.flyingFromId && DESTINATIONS_BY_ID[liveState.flyingFromId]) ||
+                currentDest
+              }
+              toDest={pendingDest}
+              durationMs={FLIGHT_DURATION_MS}
+              compact
+            />
           </div>
         )}
 

@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Compass,
   Map as MapIcon,
@@ -20,6 +22,7 @@ import type {
 } from '../types/game';
 import { AnimalAvatar } from './art/AnimalAvatar';
 import { SouvenirArt } from './art/SouvenirArt';
+import { FLIGHT_DURATION_MS, FlightJourneyCard } from './FlightJourneyCard';
 import { TimeFlipPostcard } from './TimeFlipPostcard';
 import { WorldAtlasMap } from './WorldAtlasMap';
 
@@ -41,6 +44,7 @@ interface ExpeditionScreenProps {
   celebratingNewDiscovery: boolean;
   tvConnectedCode: string | null;
   onSelectRoute: (destId: string) => void;
+  onLandEarly: () => void;
   onChangeLevel: (level: DifficultyLevel) => void;
   onPickAnswer: (index: number) => void;
   onAskCrew: () => void;
@@ -75,6 +79,7 @@ export function ExpeditionScreen({
   celebratingNewDiscovery,
   tvConnectedCode,
   onSelectRoute,
+  onLandEarly,
   onChangeLevel,
   onPickAnswer,
   onAskCrew,
@@ -86,8 +91,35 @@ export function ExpeditionScreen({
   onExitHome,
 }: ExpeditionScreenProps) {
   const [showMapInController, setShowMapInController] = useState(false);
+  // Explicit user override for map visibility in Single-Screen mode (resets cleanly per phase)
+  const [mapOverride, setMapOverride] = useState<{
+    phase: TurnPhase;
+    expanded: boolean;
+  } | null>(null);
+
+  const isCompactViewport =
+    typeof window !== 'undefined' && window.innerWidth <= 1024;
+
+  // Smart default: show map during route choice & flying; on tablets/smaller screens,
+  // auto-collapse map during question & postcard so content has full room (with 1-tap expand!).
+  const defaultMapExpanded =
+    turnPhase === 'choose-route' ||
+    turnPhase === 'flying' ||
+    !isCompactViewport;
+
+  const isMapExpanded =
+    mapOverride && mapOverride.phase === turnPhase
+      ? mapOverride.expanded
+      : defaultMapExpanded;
+
+  const toggleMapExpanded = () => {
+    setMapOverride({ phase: turnPhase, expanded: !isMapExpanded });
+  };
 
   const currentDest = DESTINATIONS_BY_ID[mission.currentDestId];
+  const flyingFromDest = flyingFromId
+    ? DESTINATIONS_BY_ID[flyingFromId]
+    : currentDest;
   const pendingDest = pendingDestId ? DESTINATIONS_BY_ID[pendingDestId] : null;
   const activeQuestion = pendingDest ? pendingDest.questions[activeLevel] : null;
   const isControllerMode = Boolean(tvConnectedCode) && !showMapInController;
@@ -163,7 +195,7 @@ export function ExpeditionScreen({
             <h2 style={{ fontSize: isControllerLayout ? '1.5rem' : '1.26rem', marginTop: 3 }}>
               Where shall we fly next, {currentPlayer.name}?
             </h2>
-            {!isControllerLayout && (
+            {!isControllerLayout && isMapExpanded && (
               <p style={{ fontSize: '0.86rem', color: 'var(--ink-soft)', marginTop: 3, fontWeight: 600 }}>
                 Tap a glowing pin on the atlas or pick a story route below!
               </p>
@@ -201,30 +233,14 @@ export function ExpeditionScreen({
         </div>
       )}
 
-      {/* PHASE 2: FLYING */}
-      {turnPhase === 'flying' && pendingDest && (
-        <div
-          className="paper-card"
-          style={{
-            padding: '28px 20px',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 10,
-          }}
-        >
-          <Compass size={38} color="var(--terracotta)" />
-          <div className="stamp-label" style={{ color: 'var(--terracotta)' }}>
-            {pendingDest.routeLabel}
-          </div>
-          <h2 style={{ fontSize: '1.45rem' }}>
-            Soaring toward {pendingDest.country}!
-          </h2>
-          <p style={{ color: 'var(--ink-soft)', fontWeight: 600 }}>
-            Hold onto your explorer hats—watch the balloon cross the map!
-          </p>
-        </div>
+      {/* PHASE 2: STORYBOOK BALLOON VOYAGE (~7.5 SECONDS) */}
+      {turnPhase === 'flying' && flyingFromDest && pendingDest && (
+        <FlightJourneyCard
+          fromDest={flyingFromDest}
+          toDest={pendingDest}
+          durationMs={FLIGHT_DURATION_MS}
+          onLandEarly={onLandEarly}
+        />
       )}
 
       {/* PHASE 3: CONFIDENCE-FIRST QUESTION */}
@@ -248,7 +264,7 @@ export function ExpeditionScreen({
             </button>
           </div>
 
-          <h2 style={{ fontSize: isControllerLayout ? '1.42rem' : '1.16rem', lineHeight: 1.35 }}>
+          <h2 style={{ fontSize: isControllerLayout ? '1.42rem' : '1.2rem', lineHeight: 1.35 }}>
             {activeQuestion.prompt}
           </h2>
 
@@ -261,7 +277,7 @@ export function ExpeditionScreen({
                   type="button"
                   disabled={tried}
                   className={`answer-btn ${tried ? 'tried' : ''}`}
-                  style={{ fontSize: isControllerLayout ? '1.15rem' : '1rem' }}
+                  style={{ fontSize: isControllerLayout ? '1.15rem' : '1.02rem' }}
                   onClick={() => onPickAnswer(idx)}
                 >
                   <span className="answer-letter">{['A', 'B', 'C'][idx]}</span>
@@ -425,7 +441,7 @@ export function ExpeditionScreen({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        {tvConnectedCode && (
+        {tvConnectedCode ? (
           <>
             <span
               className="level-pill navigator"
@@ -441,6 +457,15 @@ export function ExpeditionScreen({
               <MapIcon size={15} /> {showMapInController ? 'Controller View' : 'Peek Map'}
             </button>
           </>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={toggleMapExpanded}
+            aria-expanded={isMapExpanded}
+          >
+            <MapIcon size={15} /> {isMapExpanded ? 'Hide Map' : 'Show Map'}
+          </button>
         )}
         <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenPassport}>
           <BookOpen size={15} /> Passport ({discoveredDestIds.length})
@@ -459,23 +484,50 @@ export function ExpeditionScreen({
     );
   }
 
-  // FULL INTERACTIVE SINGLE-SCREEN / CAST LAYOUT
+  // FULL INTERACTIVE SINGLE-SCREEN / CAST LAYOUT (NATURAL SCROLL + COLLAPSIBLE MAP)
   return (
-    <div className="expedition-shell">
+    <div className={`expedition-shell ${isMapExpanded ? 'split-open' : ''}`}>
       {headerBar}
-      <div className="expedition-body">
-        <div className="map-stage">
-          <WorldAtlasMap
-            currentDestId={mission.currentDestId}
-            visitedDestIds={mission.visitedDestIds}
-            discoveredDestIds={discoveredDestIds}
-            routeOptions={turnPhase === 'choose-route' ? routeOptions : []}
-            flyingFromId={turnPhase === 'flying' ? flyingFromId : null}
-            flyingToId={turnPhase === 'flying' ? pendingDestId : null}
-            interactive={turnPhase === 'choose-route'}
-            onSelectRoute={onSelectRoute}
-          />
-        </div>
+      <div className={`expedition-body ${isMapExpanded ? '' : 'map-collapsed'}`}>
+        {isMapExpanded ? (
+          <div className="map-stage">
+            <button
+              type="button"
+              className="map-collapse-pill"
+              onClick={toggleMapExpanded}
+              title="Collapse map for more reading space"
+            >
+              <ChevronUp size={16} /> Collapse Map
+            </button>
+            <WorldAtlasMap
+              currentDestId={mission.currentDestId}
+              visitedDestIds={mission.visitedDestIds}
+              discoveredDestIds={discoveredDestIds}
+              routeOptions={turnPhase === 'choose-route' ? routeOptions : []}
+              flyingFromId={turnPhase === 'flying' ? flyingFromId : null}
+              flyingToId={turnPhase === 'flying' ? pendingDestId : null}
+              flightDurationMs={FLIGHT_DURATION_MS}
+              interactive={turnPhase === 'choose-route'}
+              onSelectRoute={onSelectRoute}
+            />
+          </div>
+        ) : (
+          <div className="map-collapsed-bar">
+            <button
+              type="button"
+              className="map-collapsed-btn"
+              onClick={toggleMapExpanded}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <MapIcon size={17} />
+                World Atlas Map Collapsed ({pendingDest ? pendingDest.country : currentDest?.country})
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                Show Map <ChevronDown size={17} />
+              </span>
+            </button>
+          </div>
+        )}
         <aside className="turn-sidebar">{renderTurnControls(false)}</aside>
       </div>
     </div>

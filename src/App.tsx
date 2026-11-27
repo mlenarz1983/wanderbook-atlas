@@ -16,6 +16,7 @@ import { BalloonEmblem } from './components/art/CompassRose';
 import { SouvenirArt } from './components/art/SouvenirArt';
 import { CrewModal } from './components/CrewModal';
 import { ExpeditionScreen } from './components/ExpeditionScreen';
+import { FLIGHT_DURATION_MS } from './components/FlightJourneyCard';
 import { NewMissionModal } from './components/NewMissionModal';
 import { PassportView } from './components/PassportView';
 import { SettingsModal } from './components/SettingsModal';
@@ -43,6 +44,7 @@ import {
   playDiscoveryFanfare,
   playFly,
   playGentleNudge,
+  playLandingChime,
   speakText,
   stopSpeaking,
 } from './utils/audio';
@@ -349,11 +351,32 @@ export function App() {
   };
 
   // Gameplay Turn Handlers
+  const completeLanding = useCallback(
+    (destId: string, level: DifficultyLevel) => {
+      if (flyTimerRef.current) {
+        window.clearTimeout(flyTimerRef.current);
+        flyTimerRef.current = null;
+      }
+      playLandingChime(soundOn);
+      setTurnPhase('question');
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+      const targetDest = DESTINATIONS_BY_ID[destId];
+      if (savedState.preferences.readAloudEnabled && targetDest) {
+        const q = targetDest.questions[level];
+        speakText(q.prompt);
+      }
+    },
+    [soundOn, savedState.preferences.readAloudEnabled]
+  );
+
   const handleSelectRoute = (destId: string) => {
     if (!activeMission || turnPhase !== 'choose-route') return;
     stopSpeaking();
     playFly(soundOn);
     const fromId = activeMission.currentDestId;
+    const chosenLevel = activeLevel;
     setFlyingFromId(fromId);
     setPendingDestId(destId);
     setCrewHelped(false);
@@ -362,15 +385,19 @@ export function App() {
     setPostcardFlipped(false);
     setTurnPhase('flying');
 
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
     if (flyTimerRef.current) window.clearTimeout(flyTimerRef.current);
     flyTimerRef.current = window.setTimeout(() => {
-      setTurnPhase('question');
-      const targetDest = DESTINATIONS_BY_ID[destId];
-      if (savedState.preferences.readAloudEnabled && targetDest) {
-        const q = targetDest.questions[activeLevel];
-        speakText(q.prompt);
-      }
-    }, 1300);
+      completeLanding(destId, chosenLevel);
+    }, FLIGHT_DURATION_MS);
+  };
+
+  const handleLandEarly = () => {
+    if (turnPhase !== 'flying' || !pendingDestId) return;
+    completeLanding(pendingDestId, activeLevel);
   };
 
   const handleChangeLevel = (level: DifficultyLevel) => {
@@ -565,6 +592,7 @@ export function App() {
           celebratingNewDiscovery={celebratingNewDiscovery}
           tvConnectedCode={tvConnectedCode}
           onSelectRoute={handleSelectRoute}
+          onLandEarly={handleLandEarly}
           onChangeLevel={handleChangeLevel}
           onPickAnswer={handlePickAnswer}
           onAskCrew={handleAskCrew}

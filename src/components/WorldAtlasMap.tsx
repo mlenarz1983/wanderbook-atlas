@@ -5,6 +5,7 @@ import type { Topology, GeometryCollection } from 'topojson-specification';
 import countriesAtlas from 'world-atlas/countries-110m.json';
 import { CONTINENT_FILLS, getContinentForCountryId } from '../data/continentMap';
 import { DESTINATIONS, DESTINATIONS_BY_ID } from '../data/destinations';
+import { FLIGHT_DURATION_MS } from './FlightJourneyCard';
 import { CompassRose } from './art/CompassRose';
 
 const MAP_WIDTH = 1000;
@@ -17,6 +18,7 @@ interface WorldAtlasMapProps {
   routeOptions: string[];
   flyingFromId?: string | null;
   flyingToId?: string | null;
+  flightDurationMs?: number;
   interactive?: boolean;
   isTvMode?: boolean;
   onSelectRoute?: (destId: string) => void;
@@ -30,7 +32,7 @@ function getArcCurve(
   const dx = p2[0] - p1[0];
   const dy = p2[1] - p1[1];
   const dist = Math.hypot(dx, dy);
-  const lift = Math.min(90, Math.max(26, dist * 0.24));
+  const lift = Math.min(96, Math.max(30, dist * 0.25));
   const cx = (p1[0] + p2[0]) / 2;
   const cy = (p1[1] + p2[1]) / 2 - lift;
   return {
@@ -60,6 +62,7 @@ export function WorldAtlasMap({
   routeOptions,
   flyingFromId = null,
   flyingToId = null,
+  flightDurationMs = FLIGHT_DURATION_MS,
   interactive = true,
   isTvMode = false,
   onSelectRoute,
@@ -68,20 +71,19 @@ export function WorldAtlasMap({
   const [hoveredRoute, setHoveredRoute] = useState<string | null>(null);
   const [flightProgress, setFlightProgress] = useState(0);
 
-  // Animate hot-air balloon smoothly along curved route during flight
+  // Animate hot-air balloon smoothly along curved route during the voyage
   useEffect(() => {
     if (!flyingFromId || !flyingToId) {
       return;
     }
     let frameId = 0;
-    const duration = 1250;
+    const duration = flightDurationMs;
     const start = performance.now();
 
     const tick = (now: number) => {
       const raw = Math.min(1, (now - start) / duration);
-      // Smooth ease-in-out cubic
-      const eased =
-        raw < 0.5 ? 4 * raw * raw * raw : 1 - Math.pow(-2 * raw + 2, 3) / 2;
+      // Gentle ease-in-out sine curve so takeoff & landing feel floaty and calm
+      const eased = -(Math.cos(Math.PI * raw) - 1) / 2;
       setFlightProgress(eased);
       if (raw < 1) {
         frameId = requestAnimationFrame(tick);
@@ -89,7 +91,7 @@ export function WorldAtlasMap({
     };
     frameId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameId);
-  }, [flyingFromId, flyingToId]);
+  }, [flyingFromId, flyingToId, flightDurationMs]);
 
   const { projection, pathGen, countries, graticulePath, spherePath } = useMemo(() => {
     const proj = geoNaturalEarth1()
@@ -126,16 +128,56 @@ export function WorldAtlasMap({
   const visitedSet = useMemo(() => new Set(visitedDestIds), [visitedDestIds]);
   const routeSet = useMemo(() => new Set(routeOptions), [routeOptions]);
 
-  // Compute animated balloon coordinates
-  const balloonPos = useMemo<[number, number]>(() => {
-    if (flyingFromId && flyingToId && destPositions[flyingFromId] && destPositions[flyingToId]) {
+  // Compute animated balloon coordinates, trailing flight wake & gentle breeze sway
+  const flightVisuals = useMemo(() => {
+    if (
+      flyingFromId &&
+      flyingToId &&
+      destPositions[flyingFromId] &&
+      destPositions[flyingToId]
+    ) {
       const p1 = destPositions[flyingFromId];
       const p2 = destPositions[flyingToId];
       const { cp } = getArcCurve(p1, p2);
-      return pointOnQuad(p1, cp, p2, flightProgress);
+      const pos = pointOnQuad(p1, cp, p2, flightProgress);
+
+      // Sample points along the arc from 0 up to current flightProgress for a drawn trail
+      const steps = 28;
+      const wakePts: string[] = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = (i / steps) * flightProgress;
+        const pt = pointOnQuad(p1, cp, p2, t);
+        wakePts.push(`${pt[0].toFixed(1)},${pt[1].toFixed(1)}`);
+      }
+
+      // Three trailing sparkle/cloud puffs right behind the balloon
+      const puffs = [0.04, 0.085, 0.13]
+        .map((lag) => Math.max(0, flightProgress - lag))
+        .filter((t) => t > 0.01)
+        .map((t, idx) => ({
+          pt: pointOnQuad(p1, cp, p2, t),
+          r: 4.5 - idx * 1.1,
+          opacity: 0.78 - idx * 0.22,
+        }));
+
+      const swayDeg = Math.sin(flightProgress * Math.PI * 5) * 6;
+      return {
+        balloonPos: pos,
+        wakePolyline: wakePts.join(' '),
+        puffs,
+        swayDeg,
+      };
     }
-    return currentPos;
+
+    return {
+      balloonPos: currentPos,
+      wakePolyline: '',
+      puffs: [] as { pt: [number, number]; r: number; opacity: number }[],
+      swayDeg: 0,
+    };
   }, [flyingFromId, flyingToId, destPositions, flightProgress, currentPos]);
+
+  const balloonPos = flightVisuals.balloonPos;
 
   // Visited trail segments in order
   const visitedSegments = useMemo(() => {
@@ -278,17 +320,62 @@ export function WorldAtlasMap({
             />
           ))}
 
-          {/* Active Flight Arc (when flying) */}
+          {/* Gentle Drifting Storybook Clouds While Flying */}
+          {flyingToId && (
+            <g opacity="0.68" style={{ pointerEvents: 'none' }}>
+              <path
+                d="M170 140 C170 132 184 130 190 135 C196 127 214 130 216 138 C224 138 226 146 218 148 L174 148 C168 148 166 142 170 140 Z"
+                fill="#FDF9F0"
+                transform={`translate(${flightProgress * 58}, 0)`}
+              />
+              <path
+                d="M670 176 C670 169 682 167 688 171 C694 164 710 167 712 174 C719 174 720 181 713 183 L674 183 C668 183 667 178 670 176 Z"
+                fill="#FDF9F0"
+                transform={`translate(${-flightProgress * 46}, 0)`}
+              />
+              <path
+                d="M410 342 C410 335 422 333 428 337 C434 330 450 333 452 340 C459 340 460 347 453 349 L414 349 C408 349 407 344 410 342 Z"
+                fill="#FDF9F0"
+                transform={`translate(${flightProgress * 42}, 0)`}
+              />
+            </g>
+          )}
+
+          {/* Active Flight Arc (when flying) — Guide Dotted Line + Progressive Drawn Golden Wake */}
           {flyingFromId && flyingToId && destPositions[flyingFromId] && destPositions[flyingToId] && (
-            <path
-              d={getArcCurve(destPositions[flyingFromId], destPositions[flyingToId]).d}
-              fill="none"
-              stroke="#C4533A"
-              strokeWidth="3.8"
-              strokeDasharray="8 6"
-              strokeLinecap="round"
-              className="route-dash-animated"
-            />
+            <g>
+              <path
+                d={getArcCurve(destPositions[flyingFromId], destPositions[flyingToId]).d}
+                fill="none"
+                stroke="#C4533A"
+                strokeOpacity="0.34"
+                strokeWidth="2.8"
+                strokeDasharray="6 7"
+                strokeLinecap="round"
+              />
+              {flightVisuals.wakePolyline && (
+                <polyline
+                  points={flightVisuals.wakePolyline}
+                  fill="none"
+                  stroke="#C4533A"
+                  strokeWidth="4.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+              {flightVisuals.puffs.map((puff, idx) => (
+                <circle
+                  key={`puff-${idx}`}
+                  cx={puff.pt[0]}
+                  cy={puff.pt[1]}
+                  r={puff.r}
+                  fill="#FDF9F0"
+                  stroke="#C88A2B"
+                  strokeWidth="1"
+                  opacity={puff.opacity}
+                />
+              ))}
+            </g>
           )}
 
           {/* Available Story Routes Radiating From Current Location */}
@@ -328,6 +415,8 @@ export function WorldAtlasMap({
             const pos = destPositions[dest.id];
             if (!pos) return null;
             const isCurrent = dest.id === currentDestId && !flyingToId;
+            const isFlightTarget = dest.id === flyingToId;
+            const isFlightOrigin = dest.id === flyingFromId && Boolean(flyingToId);
             const isRouteOption = routeSet.has(dest.id) && !flyingToId;
             const isDiscovered = discoveredSet.has(dest.id);
             const isVisitedInMission = visitedSet.has(dest.id);
@@ -352,39 +441,51 @@ export function WorldAtlasMap({
                   }
                 }}
               >
-                {/* Pulsing Beacon for Route Options */}
-                {isRouteOption && (
+                {/* Pulsing Beacon for Route Options or Landing Destination */}
+                {(isRouteOption || isFlightTarget) && (
                   <circle
-                    r="13"
+                    r={isFlightTarget ? '16' : '13'}
                     fill="#C4533A"
-                    opacity="0.34"
+                    opacity="0.38"
                     className="pin-pulse"
                   />
                 )}
 
                 {/* Pin Base */}
                 <circle
-                  r={isRouteOption ? (isHovered ? 10 : 8.5) : isCurrent ? 7.5 : isDiscovered ? 6 : 4.2}
+                  r={
+                    isFlightTarget
+                      ? 9.5
+                      : isRouteOption
+                        ? isHovered
+                          ? 10
+                          : 8.5
+                        : isCurrent || isFlightOrigin
+                          ? 7.5
+                          : isDiscovered
+                            ? 6
+                            : 4.2
+                  }
                   fill={
-                    isRouteOption
+                    isRouteOption || isFlightTarget
                       ? '#C4533A'
-                      : isCurrent
+                      : isCurrent || isFlightOrigin
                         ? '#1F5A63'
                         : isDiscovered || isVisitedInMission
                           ? '#C88A2B'
                           : '#FBF5E8'
                   }
                   stroke="#2B231D"
-                  strokeWidth={isRouteOption || isCurrent ? '2.1' : '1.4'}
+                  strokeWidth={isRouteOption || isCurrent || isFlightTarget ? '2.1' : '1.4'}
                 />
 
                 {/* Inner Star/Dot */}
-                {(isRouteOption || isDiscovered) && (
-                  <circle r={isRouteOption ? 3 : 2.1} fill="#FBF5E8" />
+                {(isRouteOption || isFlightTarget || isDiscovered) && (
+                  <circle r={isRouteOption || isFlightTarget ? 3 : 2.1} fill="#FBF5E8" />
                 )}
 
-                {/* Crisp Label Pill for Route Options or Active Destination */}
-                {(isRouteOption || isCurrent || isHovered) && (
+                {/* Crisp Label Pill for Route Options, Active, or Flight Endpoints */}
+                {(isRouteOption || isCurrent || isFlightTarget || isFlightOrigin || isHovered) && (
                   <g
                     transform={`translate(0, ${pos[1] < 95 ? 24 : -18})`}
                     style={{ pointerEvents: 'none' }}
@@ -395,7 +496,7 @@ export function WorldAtlasMap({
                       width={dest.country.length * 7.4 + 32}
                       height="21"
                       rx="10"
-                      fill={isRouteOption ? '#FDF9F0' : '#1F5A63'}
+                      fill={isRouteOption || isFlightTarget ? '#FDF9F0' : '#1F5A63'}
                       stroke="#2B231D"
                       strokeWidth="1.4"
                     />
@@ -405,7 +506,7 @@ export function WorldAtlasMap({
                       fontFamily="Nunito, sans-serif"
                       fontWeight="800"
                       fontSize="10.5"
-                      fill={isRouteOption ? '#2B231D' : '#FDF9F0'}
+                      fill={isRouteOption || isFlightTarget ? '#2B231D' : '#FDF9F0'}
                     >
                       {dest.country}
                     </text>
@@ -417,39 +518,48 @@ export function WorldAtlasMap({
 
           {/* Crew's Striped Hot-Air Balloon */}
           <g transform={`translate(${balloonPos[0]}, ${balloonPos[1] - 24})`}>
-            <g className="balloon-bob">
-              {/* Soft ground shadow */}
-              <ellipse cx="0" cy="24" rx="9" ry="3.5" fill="#2B231D" opacity="0.22" />
-              {/* Balloon Envelope */}
-              <path
-                d="M0 -20 C-11 -20 -16 -12 -16 -3 C-16 5 -9 10 -5 14 L5 14 C9 10 16 5 16 -3 C16 -12 11 -20 0 -20 Z"
-                fill="#C4533A"
-                stroke="#2B231D"
-                strokeWidth="2"
-              />
-              <path
-                d="M0 -20 C-6 -20 -9 -12 -9 -3 C-9 5 -5 10 -3 14 L3 14 C5 10 9 5 9 -3 C9 -12 6 -20 0 -20 Z"
-                fill="#FBF5E8"
-                stroke="#2B231D"
-                strokeWidth="1.6"
-              />
-              <path
-                d="M0 -20 C-2 -12 -2.5 -3 -1.5 14 L1.5 14 C2.5 -3 2 -12 0 -20 Z"
-                fill="#C88A2B"
-              />
-              {/* Basket */}
-              <line x1="-3.5" y1="14" x2="-3" y2="18" stroke="#2B231D" strokeWidth="1.4" />
-              <line x1="3.5" y1="14" x2="3" y2="18" stroke="#2B231D" strokeWidth="1.4" />
-              <rect
-                x="-5"
-                y="17.5"
-                width="10"
-                height="5.5"
-                rx="1.8"
-                fill="#B67B3E"
-                stroke="#2B231D"
-                strokeWidth="1.6"
-              />
+            <g transform={`rotate(${flightVisuals.swayDeg.toFixed(1)})`}>
+              <g className="balloon-bob">
+                {/* Soft ground shadow */}
+                <ellipse
+                  cx="0"
+                  cy={flyingToId ? 30 : 24}
+                  rx={flyingToId ? 7 : 9}
+                  ry={flyingToId ? 2.5 : 3.5}
+                  fill="#2B231D"
+                  opacity={flyingToId ? 0.14 : 0.22}
+                />
+                {/* Balloon Envelope */}
+                <path
+                  d="M0 -20 C-11 -20 -16 -12 -16 -3 C-16 5 -9 10 -5 14 L5 14 C9 10 16 5 16 -3 C16 -12 11 -20 0 -20 Z"
+                  fill="#C4533A"
+                  stroke="#2B231D"
+                  strokeWidth="2"
+                />
+                <path
+                  d="M0 -20 C-6 -20 -9 -12 -9 -3 C-9 5 -5 10 -3 14 L3 14 C5 10 9 5 9 -3 C9 -12 6 -20 0 -20 Z"
+                  fill="#FBF5E8"
+                  stroke="#2B231D"
+                  strokeWidth="1.6"
+                />
+                <path
+                  d="M0 -20 C-2 -12 -2.5 -3 -1.5 14 L1.5 14 C2.5 -3 2 -12 0 -20 Z"
+                  fill="#C88A2B"
+                />
+                {/* Basket */}
+                <line x1="-3.5" y1="14" x2="-3" y2="18" stroke="#2B231D" strokeWidth="1.4" />
+                <line x1="3.5" y1="14" x2="3" y2="18" stroke="#2B231D" strokeWidth="1.4" />
+                <rect
+                  x="-5"
+                  y="17.5"
+                  width="10"
+                  height="5.5"
+                  rx="1.8"
+                  fill="#B67B3E"
+                  stroke="#2B231D"
+                  strokeWidth="1.6"
+                />
+              </g>
             </g>
           </g>
         </g>
