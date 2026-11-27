@@ -9,37 +9,45 @@ import {
   ChevronUp,
   Clock,
   Compass,
+  ExternalLink,
   FileText,
   Landmark,
   Map as MapIcon,
+  MapPin,
   Plane,
   ShieldCheck,
   Sparkles,
   Store,
+  Trees,
   Tv,
   Users,
   Volume2,
 } from 'lucide-react';
 import { SUSPECTS_BY_ID } from '../data/cases';
 import {
+  DESTINATIONS,
   DESTINATIONS_BY_ID,
   computeDistanceMiles,
   computeFlightHours,
 } from '../data/destinations';
-import { TOWN_SPOTS } from '../engine/questionEngine';
+import { getCityLayout } from '../data/landmarks';
 import type {
+  AvatarId,
   CaseMission,
+  CityLandmark,
   DifficultyLevel,
   Player,
   QuizQuestion,
-  TownSpotId,
+  SpotRole,
   TurnPhase,
   WitnessClue,
 } from '../types/game';
 import { formatTravelClock } from '../utils/storage';
 import { AnimalAvatar } from './art/AnimalAvatar';
 import { SouvenirArt } from './art/SouvenirArt';
-import { FLIGHT_DURATION_MS, FlightJourneyCard } from './FlightJourneyCard';
+import { CityOrientationMap } from './CityOrientationMap';
+import { CulpritBadge } from './CulpritBadge';
+import { FlightJourneyCard } from './FlightJourneyCard';
 import { TimeFlipPostcard } from './TimeFlipPostcard';
 import { WorldAtlasMap } from './WorldAtlasMap';
 
@@ -47,13 +55,16 @@ interface ExpeditionScreenProps {
   mission: CaseMission;
   currentPlayer: Player;
   nextPlayer: Player;
+  crewAvatars: AvatarId[];
   discoveredDestIds: string[];
   turnPhase: TurnPhase;
-  activeSpotId: TownSpotId | null;
+  activeSpotId: string | null;
+  lastVisitedSpotId: string | null;
   activeQuestion: QuizQuestion | null;
   latestWitnessClue: WitnessClue | null;
   flyingFromId: string | null;
   flyingToId: string | null;
+  flightDurationMs: number;
   activeLevel: DifficultyLevel;
   crewHelped: boolean;
   triedChoiceIndices: number[];
@@ -63,7 +74,7 @@ interface ExpeditionScreenProps {
   celebratingNewDiscovery: boolean;
   warrantFeedback: string | null;
   tvConnectedCode: string | null;
-  onSelectSpot: (spotId: TownSpotId) => void;
+  onSelectSpot: (spot: CityLandmark) => void;
   onChangeLevel: (level: DifficultyLevel) => void;
   onPickAnswer: (index: number) => void;
   onAskCrew: () => void;
@@ -97,13 +108,16 @@ export function ExpeditionScreen({
   mission,
   currentPlayer,
   nextPlayer,
+  crewAvatars,
   discoveredDestIds,
   turnPhase,
   activeSpotId,
+  lastVisitedSpotId,
   activeQuestion,
   latestWitnessClue,
   flyingFromId,
   flyingToId,
+  flightDurationMs,
   activeLevel,
   crewHelped,
   triedChoiceIndices,
@@ -144,8 +158,8 @@ export function ExpeditionScreen({
   const isCompactViewport =
     typeof window !== 'undefined' && window.innerWidth <= 1024;
 
-  // Show atlas prominently during Departure Board & Flying; auto-collapse on tablets
-  // during town reading, questions, postcards, and finale so nothing is obscured!
+  // Show world atlas prominently during Departure Board & Flying; auto-collapse on tablets
+  // during town investigation, challenges, postcards, and finale so content is unobstructed!
   const defaultMapExpanded =
     turnPhase === 'departure-board' ||
     turnPhase === 'flying' ||
@@ -160,6 +174,7 @@ export function ExpeditionScreen({
     setMapOverride({ phase: turnPhase, expanded: !isMapExpanded });
 
   const currentDest = DESTINATIONS_BY_ID[mission.currentDestId];
+  const currentCityLayout = getCityLayout(mission.currentDestId);
   const lastValidDest = DESTINATIONS_BY_ID[mission.lastValidDestId];
   const flyingFromDest = flyingFromId ? DESTINATIONS_BY_ID[flyingFromId] : currentDest;
   const flyingToDest = flyingToId ? DESTINATIONS_BY_ID[flyingToId] : null;
@@ -178,15 +193,24 @@ export function ExpeditionScreen({
   );
   const discoveredTraitCount = Object.keys(mission.discoveredSuspectTraits).length;
   const culprit = SUSPECTS_BY_ID[mission.culpritId];
+  const activeSpotObj =
+    currentCityLayout.landmarks.find((s) => s.id === activeSpotId) ?? null;
 
-  const spotIcon = (id: TownSpotId) => {
-    if (id === 'harbor') return <Compass size={22} color="var(--mariner)" />;
-    if (id === 'market') return <Store size={22} color="var(--ochre-dark)" />;
-    return <Landmark size={22} color="var(--terracotta)" />;
+  const spotIcon = (role: SpotRole) => {
+    if (role === 'harbor') return <Compass size={21} color="var(--mariner)" />;
+    if (role === 'market') return <Store size={21} color="var(--ochre-dark)" />;
+    if (role === 'archive') return <Landmark size={21} color="#8B4A3B" />;
+    if (role === 'nature') return <Trees size={21} color="var(--sage)" />;
+    return <MapPin size={21} color="var(--terracotta)" />;
   };
 
   const renderTurnContent = (isControllerLayout: boolean) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Visual Culprit / Target Portrait & Discovered Traits */}
+      {turnPhase !== 'case-complete' && (
+        <CulpritBadge mission={mission} onOpenNotebook={onOpenNotebook} />
+      )}
+
       {/* Active Explorer + 4-Tier Opt-In Switcher */}
       {turnPhase !== 'case-complete' && (
         <div
@@ -205,7 +229,13 @@ export function ExpeditionScreen({
                 <div className="stamp-label" style={{ color: 'var(--terracotta)', fontSize: '0.68rem' }}>
                   {isMultiPlayer ? 'ACTIVE DETECTIVE' : 'LEAD DETECTIVE'}
                 </div>
-                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: isControllerLayout ? '1.3rem' : '1.12rem' }}>
+                <div
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    fontWeight: 800,
+                    fontSize: isControllerLayout ? '1.3rem' : '1.12rem',
+                  }}
+                >
                   {currentPlayer.name}
                 </div>
               </div>
@@ -238,28 +268,38 @@ export function ExpeditionScreen({
       )}
 
       {/* ====================================================================
-          PHASE 1: TOWN INVESTIGATION HUB (MULTI-TURN PER CITY!)
+          PHASE 1: TOWN INVESTIGATION HUB — CITY ORIENTATION MAP + 5 REAL STOPS!
          ==================================================================== */}
       {turnPhase === 'town-hub' && currentDest && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="paper-card" style={{ padding: '14px 16px', background: 'var(--parchment)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-              <div>
-                <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
-                  {isAtFinalTrailCity
-                    ? `★ FINAL HIDEOUT CITY • STOP ${mission.trailProgressIndex + 1} OF ${mission.trailDestIds.length}`
-                    : `ON THE TRAIL • CITY ${mission.trailProgressIndex + 1} OF ${mission.trailDestIds.length}`}
-                </div>
-                <h2 style={{ fontSize: isControllerLayout ? '1.5rem' : '1.28rem', marginTop: 2 }}>
-                  {currentDest.name}, {currentDest.country}
-                </h2>
-                <p style={{ fontSize: '0.86rem', color: 'var(--ink-soft)', fontWeight: 600, marginTop: 3 }}>
-                  “{currentDest.greeting}” — Investigate local spots to gather clues about{' '}
-                  {isAtFinalTrailCity ? 'who is hiding right here!' : 'where the trail went next!'}
-                </p>
-              </div>
+            <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
+              {isAtFinalTrailCity
+                ? `★ FINAL HIDEOUT CITY • STOP ${mission.trailProgressIndex + 1} OF ${mission.trailDestIds.length}`
+                : `ON THE TRAIL • CITY ${mission.trailProgressIndex + 1} OF ${mission.trailDestIds.length}`}
             </div>
+            <h2 style={{ fontSize: isControllerLayout ? '1.5rem' : '1.28rem', marginTop: 2 }}>
+              {currentDest.name}, {currentDest.country}
+            </h2>
+            <p style={{ fontSize: '0.86rem', color: 'var(--ink-soft)', fontWeight: 600, marginTop: 3 }}>
+              “{currentDest.greeting}” — Explore any of 5 real landmarks around {currentDest.name} to
+              gather clues about{' '}
+              {isAtFinalTrailCity ? 'who is hiding right here!' : 'where the trail leads next!'}
+            </p>
           </div>
+
+          {/* Illustrated Spatial City Orientation Map with Crew Avatars */}
+          <CityOrientationMap
+            dest={currentDest}
+            layout={currentCityLayout}
+            investigatedSpotIds={investigatedHere}
+            crewAvatars={crewAvatars}
+            activeSpotId={activeSpotId}
+            lastVisitedSpotId={lastVisitedSpotId}
+            isAtFinalTrailCity={isAtFinalTrailCity}
+            interactive
+            onSelectSpot={onSelectSpot}
+          />
 
           {/* Latest Witness Clue Spotlight (just unlocked!) */}
           {latestWitnessClue && (
@@ -276,7 +316,7 @@ export function ExpeditionScreen({
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                 <div className="stamp-label" style={{ color: 'var(--sage-dark)' }}>
-                  ✓ NEW CLUE FROM {latestWitnessClue.witnessName.toUpperCase()}
+                  ✓ NEW CLUE FROM {latestWitnessClue.witnessName.toUpperCase()} ({latestWitnessClue.spotTitle.toUpperCase()})
                 </div>
                 <button
                   type="button"
@@ -319,62 +359,120 @@ export function ExpeditionScreen({
             </div>
           )}
 
-          {/* 3 Local Investigation Spots */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {/* 5 Unique Real Confirmed Local Stops */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div className="stamp-label" style={{ color: 'var(--ink-muted)' }}>
-              LOCAL SPOTS TO INVESTIGATE (3 HOURS EACH)
+              5 REAL LANDMARKS IN {currentDest.name.toUpperCase()} (3 HOURS EACH)
             </div>
-            {TOWN_SPOTS.map((spot) => {
+            {currentCityLayout.landmarks.map((spot, idx) => {
               const visited = investigatedHere.includes(spot.id);
               const existingClue = currentCityClues.find((c) => c.spotId === spot.id);
+              const mapsSpotUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                `${spot.name}, ${currentDest.name}, ${currentDest.country}`
+              )}`;
+
               return (
-                <button
+                <div
                   key={spot.id}
-                  type="button"
-                  disabled={visited}
-                  onClick={() => onSelectSpot(spot.id)}
-                  className="route-choice-btn"
                   style={{
-                    opacity: visited ? 0.88 : 1,
-                    background: visited ? 'var(--parchment)' : 'var(--parchment-bright)',
-                    borderColor: visited ? 'rgba(70,120,86,0.45)' : undefined,
-                    cursor: visited ? 'default' : 'pointer',
+                    position: 'relative',
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    gap: 6,
                   }}
                 >
-                  <div
+                  <button
+                    type="button"
+                    disabled={visited}
+                    onClick={() => onSelectSpot(spot)}
+                    className="route-choice-btn"
                     style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 12,
-                      background: visited ? 'var(--sage-soft)' : 'var(--parchment-deep)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
+                      flex: 1,
+                      padding: '11px 13px',
+                      opacity: visited ? 0.9 : 1,
+                      background: visited ? 'var(--parchment)' : 'var(--parchment-bright)',
+                      borderColor: visited ? 'rgba(70,120,86,0.45)' : undefined,
+                      cursor: visited ? 'default' : 'pointer',
                     }}
                   >
-                    {visited ? <CheckCircle2 size={22} color="var(--sage)" /> : spotIcon(spot.id)}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.05rem' }}>
-                        {spot.title}
-                      </span>
-                      <span className="stamp-label" style={{ fontSize: '0.7rem', color: visited ? 'var(--sage-dark)' : 'var(--terracotta)' }}>
-                        {visited ? 'INVESTIGATED' : `+${spot.clockHours}H`}
-                      </span>
+                    <div
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 12,
+                        background: visited ? 'var(--sage-soft)' : 'var(--parchment-deep)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        position: 'relative',
+                      }}
+                    >
+                      {visited ? (
+                        <CheckCircle2 size={21} color="var(--sage)" />
+                      ) : (
+                        spotIcon(spot.role)
+                      )}
+                      {!visited && (
+                        <span
+                          style={{
+                            position: 'absolute',
+                            top: -5,
+                            left: -5,
+                            width: 18,
+                            height: 18,
+                            borderRadius: '50%',
+                            background: 'var(--ink)',
+                            color: '#FDF9F0',
+                            fontSize: '0.68rem',
+                            fontWeight: 900,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          {idx + 1}
+                        </span>
+                      )}
                     </div>
-                    {existingClue ? (
-                      <div style={{ fontSize: '0.84rem', color: 'var(--ink)', fontWeight: 700, marginTop: 4, lineHeight: 1.4 }}>
-                        {existingClue.destinationClue}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.01rem' }}>
+                          {spot.name}
+                        </span>
+                        <span
+                          className="stamp-label"
+                          style={{
+                            fontSize: '0.68rem',
+                            color: visited ? 'var(--sage-dark)' : 'var(--terracotta)',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {visited ? 'VISITED' : `+${spot.clockHours}H`}
+                        </span>
                       </div>
-                    ) : (
-                      <div style={{ fontSize: '0.82rem', color: 'var(--ink-soft)', fontWeight: 600, marginTop: 2 }}>
-                        {spot.subtitle}
+                      <div style={{ fontSize: '0.76rem', color: 'var(--mariner)', fontWeight: 800, marginTop: 1 }}>
+                        {spot.district} • Ask the {spot.witnessTitle}
                       </div>
-                    )}
-                  </div>
-                </button>
+                      {existingClue && (
+                        <div style={{ fontSize: '0.84rem', color: 'var(--ink)', fontWeight: 800, marginTop: 4, lineHeight: 1.4 }}>
+                          {existingClue.destinationClue}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+
+                  <a
+                    href={mapsSpotUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="spot-gmaps-btn"
+                    title={`See ${spot.name} on Google Maps`}
+                    aria-label={`Open ${spot.name} in Google Maps`}
+                  >
+                    <ExternalLink size={14} />
+                  </a>
+                </div>
               );
             })}
           </div>
@@ -400,7 +498,7 @@ export function ExpeditionScreen({
                 <Plane size={20} />
                 {currentCityClues.length === 0
                   ? 'Peek at 5-City Departure Board'
-                  : `Ready to Deduce? Open Departure Board (${currentCityClues.length}/3 Clues)`}
+                  : `Ready to Deduce? Open Departure Board (${currentCityClues.length}/5 Clues)`}
               </button>
               <button
                 type="button"
@@ -417,11 +515,11 @@ export function ExpeditionScreen({
       {/* ====================================================================
           PHASE 2: SPOT CHALLENGE (SERIOUS 4-CHOICE CHALLENGE + FREE ALMANAC!)
          ==================================================================== */}
-      {turnPhase === 'spot-challenge' && activeQuestion && activeSpotId && (
+      {turnPhase === 'spot-challenge' && activeQuestion && activeSpotObj && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
-              {TOWN_SPOTS.find((s) => s.id === activeSpotId)?.title.toUpperCase()} • {activeQuestion.category.toUpperCase()}
+              {activeSpotObj.name.toUpperCase()} • {activeQuestion.category.toUpperCase()}
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button
@@ -519,11 +617,11 @@ export function ExpeditionScreen({
             )}
           </div>
 
-          {/* Inline Clue Recap from Last Valid City */}
+          {/* Inline Bold Clue Recap from Last Valid City */}
           <div className="paper-card" style={{ padding: '11px 13px', background: 'var(--ochre-soft)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
               <span className="stamp-label" style={{ color: 'var(--ochre-dark)', fontSize: '0.7rem' }}>
-                YOUR CLUES FROM {lastValidDest?.name.toUpperCase()} ({currentCityClues.length}/3)
+                YOUR CLUES FROM {lastValidDest?.name.toUpperCase()} ({currentCityClues.length}/5)
               </span>
               <button
                 type="button"
@@ -535,19 +633,21 @@ export function ExpeditionScreen({
               </button>
             </div>
             {currentCityClues.length === 0 ? (
-              <p style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--ink-soft)' }}>
+              <p style={{ fontSize: '0.86rem', fontWeight: 800, color: 'var(--ink-soft)' }}>
                 You haven’t gathered any town clues yet! Flying blind risks a Cold Trail—head back to town to interview locals first!
               </p>
             ) : (
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.86rem', fontWeight: 700, lineHeight: 1.45 }}>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.88rem', fontWeight: 800, lineHeight: 1.45 }}>
                 {currentCityClues.map((c, idx) => (
-                  <li key={idx} style={{ marginBottom: 4 }}>{c.destinationClue}</li>
+                  <li key={idx} style={{ marginBottom: 4 }}>
+                    {c.destinationClue}
+                  </li>
                 ))}
               </ul>
             )}
           </div>
 
-          {/* 5 Plausible Candidate Flights */}
+          {/* 5 Spread-Out Plausible Candidate Flights */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {mission.departureOptions.map((destId) => {
               const dest = DESTINATIONS_BY_ID[destId];
@@ -579,13 +679,14 @@ export function ExpeditionScreen({
       )}
 
       {/* ====================================================================
-          PHASE 4: 7.5-SECOND STORYBOOK HOT-AIR BALLOON VOYAGE
+          PHASE 4: DISTANCE-ACCURATE STORYBOOK HOT-AIR BALLOON VOYAGE
          ==================================================================== */}
       {turnPhase === 'flying' && flyingFromDest && flyingToDest && (
         <FlightJourneyCard
           fromDest={flyingFromDest}
           toDest={flyingToDest}
-          durationMs={FLIGHT_DURATION_MS}
+          crewAvatars={crewAvatars}
+          durationMs={flightDurationMs}
           onLandEarly={onLandEarly}
         />
       )}
@@ -612,9 +713,9 @@ export function ExpeditionScreen({
             Nobody Spotted Them in {currentDest.name}!
           </h2>
           <p style={{ fontSize: '0.94rem', lineHeight: 1.5, fontWeight: 700, color: 'var(--ink)' }}>
-            We searched the docks and markets of <strong>{currentDest.country}</strong>, but the
-            trail is completely cold! That detour burned precious hours on the Travel Clock—let’s
-            compare our <strong>{lastValidDest.name}</strong> clues against the free Field Guide!
+            We searched the landmarks of <strong>{currentDest.country}</strong>, but the trail is
+            completely cold! That detour burned precious hours on the Travel Clock—let’s compare our{' '}
+            <strong>{lastValidDest.name}</strong> clues against the free Field Guide!
           </p>
 
           {currentCityClues.length > 0 && (
@@ -622,9 +723,11 @@ export function ExpeditionScreen({
               <div className="stamp-label" style={{ color: 'var(--mariner)', fontSize: '0.7rem', marginBottom: 4 }}>
                 RE-READ YOUR CLUES FROM {lastValidDest.name.toUpperCase()}
               </div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.86rem', fontWeight: 700, lineHeight: 1.45 }}>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.88rem', fontWeight: 800, lineHeight: 1.45 }}>
                 {currentCityClues.map((c, idx) => (
-                  <li key={idx}>{c.destinationClue}</li>
+                  <li key={idx} style={{ marginBottom: 4 }}>
+                    {c.destinationClue}
+                  </li>
                 ))}
               </ul>
             </div>
@@ -768,7 +871,10 @@ export function ExpeditionScreen({
                   <AnimalAvatar avatar={s.avatar} size={46} />
                   <div style={{ flex: 1, fontSize: '0.82rem', lineHeight: 1.4 }}>
                     <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1.05rem' }}>
-                      {s.name} — <span style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--ink-soft)' }}>{s.title}</span>
+                      {s.name} —{' '}
+                      <span style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--ink-soft)' }}>
+                        {s.title}
+                      </span>
                     </div>
                     <div>
                       <strong>{s.accessory}</strong> • loves {s.favoriteTreat} • with {s.companion} • {s.hobby}
@@ -878,7 +984,7 @@ export function ExpeditionScreen({
               <Sparkles size={19} /> Launch Next Mystery Case
             </button>
             <button type="button" className="btn btn-ochre" onClick={onOpenPassport}>
-              <BookOpen size={18} /> View 100-Stop Family Passport
+              <BookOpen size={18} /> View {DESTINATIONS.length}-Stop Family Passport
             </button>
             <button type="button" className="btn btn-secondary" onClick={onExitHome}>
               Return to Expedition Hub
@@ -926,11 +1032,7 @@ export function ExpeditionScreen({
         >
           <BookOpen size={15} /> Field Guide
         </button>
-        <button
-          type="button"
-          className="btn btn-ochre btn-sm"
-          onClick={onOpenNotebook}
-        >
+        <button type="button" className="btn btn-ochre btn-sm" onClick={onOpenNotebook}>
           <FileText size={15} /> Dossier ({discoveredTraitCount}/4)
         </button>
         {tvConnectedCode ? (
@@ -972,11 +1074,7 @@ export function ExpeditionScreen({
       <div className={`expedition-body ${isMapExpanded ? '' : 'map-collapsed'}`}>
         {isMapExpanded ? (
           <div className="map-stage">
-            <button
-              type="button"
-              className="map-collapse-pill"
-              onClick={toggleMapExpanded}
-            >
+            <button type="button" className="map-collapse-pill" onClick={toggleMapExpanded}>
               <ChevronUp size={16} /> Collapse Map
             </button>
             <WorldAtlasMap
@@ -984,9 +1082,10 @@ export function ExpeditionScreen({
               visitedDestIds={mission.visitedDestIds}
               discoveredDestIds={discoveredDestIds}
               routeOptions={turnPhase === 'departure-board' ? mission.departureOptions : []}
+              crewAvatars={crewAvatars}
               flyingFromId={turnPhase === 'flying' ? flyingFromId : null}
               flyingToId={turnPhase === 'flying' ? flyingToId : null}
-              flightDurationMs={FLIGHT_DURATION_MS}
+              flightDurationMs={flightDurationMs}
               interactive={turnPhase === 'departure-board'}
               onSelectRoute={onFlyToDestination}
             />

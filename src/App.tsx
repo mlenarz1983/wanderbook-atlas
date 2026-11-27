@@ -20,7 +20,6 @@ import { CaseNotebookModal } from './components/CaseNotebookModal';
 import { CrewModal } from './components/CrewModal';
 import { ExpeditionScreen } from './components/ExpeditionScreen';
 import { FieldGuideModal } from './components/FieldGuideModal';
-import { FLIGHT_DURATION_MS } from './components/FlightJourneyCard';
 import { NewMissionModal } from './components/NewMissionModal';
 import { PassportView } from './components/PassportView';
 import { SettingsModal } from './components/SettingsModal';
@@ -31,19 +30,25 @@ import {
   DESTINATIONS,
   DESTINATIONS_BY_ID,
   buildDepartureBoard,
+  computeFlightAnimationMs,
   computeFlightHours,
 } from './data/destinations';
-import { generateWitnessClue, selectSpotQuestion } from './engine/questionEngine';
+import { getCityLayout } from './data/landmarks';
+import {
+  generateWitnessClue,
+  getLowestCrewLevel,
+  selectSpotQuestion,
+} from './engine/questionEngine';
 import type {
   AvatarId,
   CaseKind,
   CaseMission,
+  CityLandmark,
   DifficultyLevel,
   LiveSessionState,
   Player,
   QuizQuestion,
   SavedAtlasState,
-  TownSpotId,
   TurnPhase,
   WitnessClue,
 } from './types/game';
@@ -67,7 +72,9 @@ import {
 } from './utils/storage';
 import {
   connectTabletToTv,
+  generateRoomCode,
   normalizeRoomCode,
+  startTabletHost,
   type TabletControllerHandle,
 } from './utils/tvSync';
 
@@ -100,11 +107,13 @@ export function App() {
 
   // Live Case Turn State
   const [turnPhase, setTurnPhase] = useState<TurnPhase>('town-hub');
-  const [activeSpotId, setActiveSpotId] = useState<TownSpotId | null>(null);
+  const [activeSpotId, setActiveSpotId] = useState<string | null>(null);
+  const [lastVisitedSpotId, setLastVisitedSpotId] = useState<string | null>(null);
   const [activeQuestion, setActiveQuestion] = useState<QuizQuestion | null>(null);
   const [latestWitnessClue, setLatestWitnessClue] = useState<WitnessClue | null>(null);
   const [flyingFromId, setFlyingFromId] = useState<string | null>(null);
   const [flyingToId, setFlyingToId] = useState<string | null>(null);
+  const [flightDurationMs, setFlightDurationMs] = useState<number>(6500);
   const [flyingIsReturn, setFlyingIsReturn] = useState(false);
   const [activeLevel, setActiveLevel] = useState<DifficultyLevel>('explorer');
   const [crewHelped, setCrewHelped] = useState(false);
@@ -115,10 +124,11 @@ export function App() {
   const [celebratingNewDiscovery, setCelebratingNewDiscovery] = useState(false);
   const [warrantFeedback, setWarrantFeedback] = useState<string | null>(null);
 
-  // TV Pairing (Android Tablet -> Google TV Streamer)
+  // Two-Way TV Pairing (Android Tablet <-> Google TV Streamer)
   const [tvModalOpen, setTvModalOpen] = useState<boolean>(Boolean(urlInit.joinCode));
   const [tvConnecting, setTvConnecting] = useState(false);
   const [tvConnectedCode, setTvConnectedCode] = useState<string | null>(null);
+  const [tabletHostCode, setTabletHostCode] = useState<string | null>(null);
   const [tvError, setTvError] = useState<string | null>(null);
   const tvHandleRef = useRef<TabletControllerHandle | null>(null);
   const flyTimerRef = useRef<number | null>(null);
@@ -170,10 +180,12 @@ export function App() {
       flippedHistoryIds: savedState.flippedHistoryIds,
       turnPhase,
       activeSpotId,
+      lastVisitedSpotId,
       activeQuestion,
       latestWitnessClue,
       flyingFromId,
       flyingToId,
+      flightDurationMs,
       activeLevel,
       crewHelped,
       triedChoiceIndices,
@@ -192,10 +204,12 @@ export function App() {
       savedState.flippedHistoryIds,
       turnPhase,
       activeSpotId,
+      lastVisitedSpotId,
       activeQuestion,
       latestWitnessClue,
       flyingFromId,
       flyingToId,
+      flightDurationMs,
       activeLevel,
       crewHelped,
       triedChoiceIndices,
@@ -207,17 +221,23 @@ export function App() {
     ]
   );
 
+  const liveSessionStateRef = useRef<LiveSessionState>(liveSessionState);
   useEffect(() => {
-    if (tvConnectedCode && tvHandleRef.current) {
+    liveSessionStateRef.current = liveSessionState;
+  }, [liveSessionState]);
+
+  useEffect(() => {
+    if ((tvConnectedCode || tabletHostCode) && tvHandleRef.current) {
       tvHandleRef.current.sendState(liveSessionState);
     }
-  }, [tvConnectedCode, liveSessionState]);
+  }, [tvConnectedCode, tabletHostCode, liveSessionState]);
 
   const handleConnectToTv = useCallback(
     (code: string) => {
       const clean = normalizeRoomCode(code);
       if (clean.length !== 4) return;
       tvHandleRef.current?.disconnect();
+      setTabletHostCode(null);
       setTvConnecting(true);
       setTvError(null);
 
@@ -227,6 +247,7 @@ export function App() {
           setTvConnectedCode(clean);
           setTvModalOpen(false);
           setTvError(null);
+          handle.sendState(liveSessionStateRef.current);
           playDiscoveryFanfare(soundOn);
         },
         onDisconnected: () => setTvConnectedCode(null),
@@ -240,10 +261,44 @@ export function App() {
     [soundOn]
   );
 
+  const startHostingFromTablet = useCallback(() => {
+    const freshCode = generateRoomCode();
+    tvHandleRef.current?.disconnect();
+    setTvConnectedCode(null);
+    setTvConnecting(false);
+    setTvError(null);
+    setTabletHostCode(freshCode);
+
+    const handle = startTabletHost(freshCode, {
+      onReady: () => {
+        setTvError(null);
+        handle.sendState(liveSessionStateRef.current);
+      },
+      onTvConnected: () => {
+        setTvConnectedCode(freshCode);
+        setTvModalOpen(false);
+        setTvError(null);
+        handle.sendState(liveSessionStateRef.current);
+        playDiscoveryFanfare(soundOn);
+      },
+      onTvDisconnected: () => setTvConnectedCode(null),
+      onError: (msg) => setTvError(msg),
+    });
+    tvHandleRef.current = handle;
+  }, [soundOn]);
+
+  const handleStopTabletHost = useCallback(() => {
+    tvHandleRef.current?.disconnect();
+    tvHandleRef.current = null;
+    setTabletHostCode(null);
+    setTvConnectedCode(null);
+  }, []);
+
   const handleDisconnectTv = () => {
     tvHandleRef.current?.disconnect();
     tvHandleRef.current = null;
     setTvConnectedCode(null);
+    setTabletHostCode(null);
   };
 
   // Open or Resume a Mystery Case
@@ -265,6 +320,7 @@ export function App() {
 
     setActiveLevel(pilot.defaultLevel);
     setActiveSpotId(null);
+    setLastVisitedSpotId(null);
     setActiveQuestion(null);
     setLatestWitnessClue(null);
     setFlyingFromId(null);
@@ -309,6 +365,7 @@ export function App() {
       savedState.players[0];
     setActiveLevel(firstPilot.defaultLevel);
     setActiveSpotId(null);
+    setLastVisitedSpotId(null);
     setActiveQuestion(null);
     setLatestWitnessClue(null);
     setFlyingFromId(null);
@@ -381,17 +438,18 @@ export function App() {
   // GAMEPLAY HANDLERS (TOWN HUB -> SPOT CHALLENGE -> DEPARTURE -> FLIGHT -> FINALE)
   // =========================================================================
 
-  const handleSelectSpot = (spotId: TownSpotId) => {
+  const handleSelectSpot = (spot: CityLandmark) => {
     if (!activeMission || turnPhase !== 'town-hub') return;
     stopSpeaking();
     playClick(soundOn);
     const q = selectSpotQuestion({
       destId: activeMission.currentDestId,
       level: activeLevel,
-      spotId,
+      spot,
       seenQuestionIds: savedState.seenQuestionIds,
     });
-    setActiveSpotId(spotId);
+    setActiveSpotId(spot.id);
+    setLastVisitedSpotId(spot.id);
     setActiveQuestion(q);
     setLatestWitnessClue(null);
     setCrewHelped(false);
@@ -407,10 +465,14 @@ export function App() {
     playClick(soundOn);
     setActiveLevel(level);
     if (turnPhase === 'spot-challenge' && activeMission && activeSpotId) {
+      const layout = getCityLayout(activeMission.currentDestId);
+      const spot =
+        layout.landmarks.find((s) => s.id === activeSpotId) ?? layout.landmarks[0];
+      if (!spot) return;
       const q = selectSpotQuestion({
         destId: activeMission.currentDestId,
         level,
-        spotId: activeSpotId,
+        spot,
         seenQuestionIds: savedState.seenQuestionIds,
       });
       setActiveQuestion(q);
@@ -428,6 +490,10 @@ export function App() {
       stopSpeaking();
       playDiscoveryFanfare(soundOn);
 
+      const layout = getCityLayout(activeMission.currentDestId);
+      const spot =
+        layout.landmarks.find((s) => s.id === activeSpotId) ?? layout.landmarks[0];
+
       const isFinalStop =
         activeMission.trailProgressIndex >= activeMission.trailDestIds.length - 1;
       const nextDestId = isFinalStop
@@ -442,17 +508,20 @@ export function App() {
       const shouldDropTrait =
         traitsFound < 4 && (spotsHere.length === 0 || isFinalStop);
 
+      // Shared witness clues automatically simplify wording for the LOWEST-level crew member!
+      const clueLevel = getLowestCrewLevel(missionPlayers);
+
       const witnessClue = generateWitnessClue({
-        spotId: activeSpotId,
+        spot,
         nextDest,
         culprit,
         caseKind: activeMission.kind,
-        level: activeLevel,
+        clueLevel,
         discoveredTraits: activeMission.discoveredSuspectTraits,
         dropSuspectTrait: shouldDropTrait,
       });
 
-      const nextHours = activeMission.hoursElapsed + 3;
+      const nextHours = activeMission.hoursElapsed + spot.clockHours;
       const outOfTime = nextHours >= activeMission.totalHoursBudget;
 
       setSavedState((prev) => {
@@ -499,6 +568,7 @@ export function App() {
       });
 
       setLatestWitnessClue(witnessClue);
+      setLastVisitedSpotId(activeSpotId);
       setActiveQuestion(null);
       setActiveSpotId(null);
       setTurnPhase(outOfTime ? 'case-complete' : 'town-hub');
@@ -576,6 +646,7 @@ export function App() {
       // Return flight back to last valid trail city
       if (isReturnFlight) {
         playLandingChime(soundOn);
+        setLastVisitedSpotId(null);
         setSavedState((prev) => ({
           ...prev,
           missions: prev.missions.map((m) =>
@@ -617,6 +688,7 @@ export function App() {
         setPostcardDestId(targetDestId);
         setPostcardFlipped(false);
         setLatestWitnessClue(null);
+        setLastVisitedSpotId(null);
 
         const nextTurnIdx =
           (activeMission.currentTurnIndex + 1) % activeMission.playerIds.length;
@@ -653,6 +725,7 @@ export function App() {
         // COLD TRAIL DRAMA!
         playGentleNudge(soundOn);
         const isNewDiscovery = !savedState.discoveredDestIds.includes(targetDestId);
+        setLastVisitedSpotId(null);
         setSavedState((prev) => ({
           ...prev,
           discoveredDestIds: isNewDiscovery
@@ -683,8 +756,10 @@ export function App() {
     stopSpeaking();
     playFly(soundOn);
     const fromId = activeMission.currentDestId;
+    const durationMs = computeFlightAnimationMs(fromId, targetDestId);
     setFlyingFromId(fromId);
     setFlyingToId(targetDestId);
+    setFlightDurationMs(durationMs);
     setFlyingIsReturn(isReturnFlight);
     setLatestWitnessClue(null);
     setTurnPhase('flying');
@@ -696,7 +771,7 @@ export function App() {
     if (flyTimerRef.current) window.clearTimeout(flyTimerRef.current);
     flyTimerRef.current = window.setTimeout(() => {
       completeFlightLanding(targetDestId, isReturnFlight);
-    }, FLIGHT_DURATION_MS);
+    }, durationMs);
   };
 
   const handleLandEarly = () => {
@@ -798,13 +873,16 @@ export function App() {
           mission={activeMission}
           currentPlayer={currentPlayer}
           nextPlayer={nextPlayer}
+          crewAvatars={missionPlayers.map((p) => p.avatar)}
           discoveredDestIds={savedState.discoveredDestIds}
           turnPhase={turnPhase}
           activeSpotId={activeSpotId}
+          lastVisitedSpotId={lastVisitedSpotId}
           activeQuestion={activeQuestion}
           latestWitnessClue={latestWitnessClue}
           flyingFromId={flyingFromId}
           flyingToId={flyingToId}
+          flightDurationMs={flightDurationMs}
           activeLevel={activeLevel}
           crewHelped={crewHelped}
           triedChoiceIndices={triedChoiceIndices}
@@ -930,7 +1008,7 @@ export function App() {
             <div>
               <h1 className="brand-title">Wanderbook Atlas</h1>
               <p className="brand-subtitle">
-                100-Destination Detective Atlas • Town Mysteries, Free Field Guide & Time-Flip Postcards
+                {DESTINATIONS.length} World Cities • 1,050 Real Landmarks • City Orientation Maps & Time-Flip Postcards
               </p>
             </div>
           </div>
@@ -1060,9 +1138,9 @@ export function App() {
                   <BalloonEmblem size={54} />
                   <h3 style={{ fontSize: '1.38rem' }}>Your First World Mystery Awaits!</h3>
                   <p style={{ color: 'var(--ink-soft)', maxWidth: 460, lineHeight: 1.5, fontWeight: 600 }}>
-                    Investigate harbors, markets & archives across 100 real destinations, consult
-                    your always-free Atlas Field Guide to deduce where the trail leads next, and
-                    crack the Suspect Warrant before the Travel Clock runs dry!
+                    Investigate 5 unique real landmarks in every city across {DESTINATIONS.length} global
+                    destinations, consult your always-free Atlas Field Guide, and crack the Suspect
+                    Warrant before the Travel Clock runs dry!
                   </p>
                   <button
                     type="button"
@@ -1146,17 +1224,21 @@ export function App() {
             <section className="tv-card" aria-label="TV and Tablet Living Room Mode">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                 <div className="stamp-label" style={{ color: '#F6DFB1' }}>LIVING ROOM MODE</div>
-                {tvConnectedCode && (
+                {tvConnectedCode ? (
                   <span className="tv-status-pill">
                     <span className="status-dot" /> Linked • {tvConnectedCode}
                   </span>
-                )}
+                ) : tabletHostCode ? (
+                  <span className="tv-status-pill">
+                    <span className="status-dot" style={{ background: '#facc15' }} /> Hosting • {tabletHostCode}
+                  </span>
+                ) : null}
               </div>
 
               <h3>Watch on TV, Pass the Tablet!</h3>
               <p>
-                Link your Android tablet to your Google TV Streamer: the big world atlas, live
-                clues, Travel Clock & 3D postcards shine on TV while everyone passes the tablet!
+                Link your Android tablet to your Google TV Streamer either way—enter your TV’s code
+                here, or display a Tablet Code for your TV to type in!
               </p>
 
               {tvConnectedCode ? (
@@ -1178,7 +1260,10 @@ export function App() {
                       setTvModalOpen(true);
                     }}
                   >
-                    <Tv size={18} /> Connect Tablet to a TV
+                    <Tv size={18} />{' '}
+                    {tabletHostCode
+                      ? `Tablet Code Ready (${tabletHostCode}) — Open Link`
+                      : 'Connect Tablet to a TV'}
                   </button>
                   <button
                     type="button"
@@ -1249,8 +1334,8 @@ export function App() {
                 </div>
               ) : (
                 <p style={{ fontSize: '0.86rem', color: 'var(--ink-soft)', marginTop: 12, lineHeight: 1.45, fontWeight: 600 }}>
-                  Explore 100 real world destinations, solve rotating mystery cases, and collect
-                  every Time-Flip Postcard and Souvenir!
+                  Explore {DESTINATIONS.length} real world destinations, solve rotating mystery cases, and
+                  collect every Time-Flip Postcard and Souvenir!
                 </p>
               )}
             </section>
@@ -1313,8 +1398,12 @@ export function App() {
         <TvConnectModal
           initialCode={urlInit.joinCode}
           isConnecting={tvConnecting}
+          tabletHostCode={tabletHostCode}
           errorMsg={tvError}
-          onConnect={handleConnectToTv}
+          onConnectToTvCode={handleConnectToTv}
+          onStartTabletHost={startHostingFromTablet}
+          onRefreshTabletHost={startHostingFromTablet}
+          onStopTabletHost={handleStopTabletHost}
           onClose={() => setTvModalOpen(false)}
         />
       )}

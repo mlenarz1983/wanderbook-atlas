@@ -4,13 +4,23 @@ interface AnimalAvatarProps {
   avatar: AvatarId;
   size?: number;
   className?: string;
+  x?: number;
+  y?: number;
 }
 
-export function AnimalAvatar({ avatar, size = 48, className = '' }: AnimalAvatarProps) {
+export function AnimalAvatar({
+  avatar,
+  size = 48,
+  className = '',
+  x,
+  y,
+}: AnimalAvatarProps) {
   const ink = '#2B231D';
 
   return (
     <svg
+      x={x}
+      y={y}
       width={size}
       height={size}
       viewBox="0 0 64 64"

@@ -5,17 +5,20 @@ import type { Topology, GeometryCollection } from 'topojson-specification';
 import countriesAtlas from 'world-atlas/countries-110m.json';
 import { CONTINENT_FILLS, getContinentForCountryId } from '../data/continentMap';
 import { DESTINATIONS, DESTINATIONS_BY_ID } from '../data/destinations';
-import { FLIGHT_DURATION_MS } from './FlightJourneyCard';
+import type { AvatarId } from '../types/game';
+import { AnimalAvatar } from './art/AnimalAvatar';
 import { CompassRose } from './art/CompassRose';
 
 const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 540;
+const DEFAULT_FLIGHT_MS = 6500;
 
 interface WorldAtlasMapProps {
   currentDestId: string;
   visitedDestIds: string[];
   discoveredDestIds: string[];
   routeOptions: string[];
+  crewAvatars?: AvatarId[];
   flyingFromId?: string | null;
   flyingToId?: string | null;
   flightDurationMs?: number;
@@ -60,9 +63,10 @@ export function WorldAtlasMap({
   visitedDestIds,
   discoveredDestIds,
   routeOptions,
+  crewAvatars = [],
   flyingFromId = null,
   flyingToId = null,
-  flightDurationMs = FLIGHT_DURATION_MS,
+  flightDurationMs = DEFAULT_FLIGHT_MS,
   interactive = true,
   isTvMode = false,
   onSelectRoute,
@@ -191,6 +195,106 @@ export function WorldAtlasMap({
     }
     return segs;
   }, [visitedDestIds, destPositions]);
+
+  // Deterministic 2D label collision avoidance + leader lines so nearby pins NEVER overlap on TV or tablet!
+  const placedLabels = useMemo(() => {
+    interface LabelBox {
+      id: string;
+      text: string;
+      px: number;
+      py: number;
+      lx: number;
+      ly: number;
+      w: number;
+      h: number;
+      isHighlight: boolean;
+    }
+
+    const boxes: LabelBox[] = [];
+    for (const dest of DESTINATIONS) {
+      const pos = destPositions[dest.id];
+      if (!pos) continue;
+      const isCurrent = dest.id === currentDestId && !flyingToId;
+      const isFlightTarget = dest.id === flyingToId;
+      const isFlightOrigin = dest.id === flyingFromId && Boolean(flyingToId);
+      const isRouteOption = routeSet.has(dest.id) && !flyingToId;
+      const isHovered = hoveredRoute === dest.id;
+      if (!(isRouteOption || isCurrent || isFlightTarget || isFlightOrigin || isHovered)) {
+        continue;
+      }
+      const labelText =
+        dest.name !== dest.country && dest.name.length + dest.country.length <= 22
+          ? `${dest.name}, ${dest.country}`
+          : dest.country;
+      const w = Math.max(76, labelText.length * 6.4 + 26);
+      const h = 23;
+      const defaultDy = pos[1] < 95 ? 26 : -22;
+      boxes.push({
+        id: dest.id,
+        text: labelText,
+        px: pos[0],
+        py: pos[1],
+        lx: pos[0],
+        ly: pos[1] + defaultDy,
+        w,
+        h,
+        isHighlight: isRouteOption || isFlightTarget,
+      });
+    }
+
+    // 18 relaxation passes gently push overlapping bubbles apart and away from pin anchors
+    for (let iter = 0; iter < 18; iter++) {
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i];
+          const b = boxes[j];
+          const overlapX = (a.w + b.w) / 2 + 10 - Math.abs(a.lx - b.lx);
+          const overlapY = (a.h + b.h) / 2 + 8 - Math.abs(a.ly - b.ly);
+          if (overlapX > 0 && overlapY > 0) {
+            if (overlapY <= overlapX * 0.85) {
+              const push = overlapY / 2 + 1.5;
+              if (a.ly <= b.ly) {
+                a.ly -= push;
+                b.ly += push;
+              } else {
+                a.ly += push;
+                b.ly -= push;
+              }
+            } else {
+              const push = overlapX / 2 + 1.5;
+              if (a.lx <= b.lx) {
+                a.lx -= push;
+                b.lx += push;
+              } else {
+                a.lx += push;
+                b.lx -= push;
+              }
+            }
+          }
+        }
+
+        // Also keep labels from sitting directly on top of another visible pin
+        const box = boxes[i];
+        for (let k = 0; k < boxes.length; k++) {
+          if (k === i) continue;
+          const pin = boxes[k];
+          const dx = box.lx - pin.px;
+          const dy = box.ly - pin.py;
+          if (Math.abs(dx) < box.w / 2 + 10 && Math.abs(dy) < box.h / 2 + 10) {
+            box.ly += dy >= 0 ? 6 : -6;
+          }
+        }
+
+        const halfW = box.w / 2;
+        box.lx = Math.max(halfW + 18, Math.min(MAP_WIDTH - halfW - 18, box.lx));
+        box.ly = Math.max(26, Math.min(MAP_HEIGHT - 26, box.ly));
+      }
+    }
+
+    return boxes;
+  }, [destPositions, currentDestId, flyingFromId, flyingToId, routeSet, hoveredRoute]);
+
+  const basketAvatars = crewAvatars.slice(0, 4);
 
   return (
     <div
@@ -410,7 +514,7 @@ export function WorldAtlasMap({
               );
             })}
 
-          {/* All 25 Destination Pins */}
+          {/* All 210 World Destination Pins */}
           {DESTINATIONS.map((dest) => {
             const pos = destPositions[dest.id];
             if (!pos) return null;
@@ -463,8 +567,8 @@ export function WorldAtlasMap({
                         : isCurrent || isFlightOrigin
                           ? 7.5
                           : isDiscovered
-                            ? 4.4
-                            : 2.6
+                            ? 3.8
+                            : 2.1
                   }
                   fill={
                     isRouteOption || isFlightTarget
@@ -476,89 +580,133 @@ export function WorldAtlasMap({
                           : '#FBF5E8'
                   }
                   stroke="#2B231D"
-                  strokeWidth={isRouteOption || isCurrent || isFlightTarget ? '2.1' : '1.0'}
-                  opacity={isRouteOption || isCurrent || isFlightTarget || isDiscovered ? 1 : 0.72}
+                  strokeWidth={isRouteOption || isCurrent || isFlightTarget ? '2.1' : '0.85'}
+                  opacity={isRouteOption || isCurrent || isFlightTarget || isDiscovered ? 1 : 0.65}
                 />
 
                 {/* Inner Star/Dot */}
                 {(isRouteOption || isFlightTarget) && (
                   <circle r={3} fill="#FBF5E8" />
                 )}
-
-                {/* Crisp Label Pill for Route Options, Active, or Flight Endpoints */}
-                {(isRouteOption || isCurrent || isFlightTarget || isFlightOrigin || isHovered) && (
-                  <g
-                    transform={`translate(0, ${pos[1] < 95 ? 24 : -18})`}
-                    style={{ pointerEvents: 'none' }}
-                  >
-                    <rect
-                      x={-(dest.country.length * 3.7 + 16)}
-                      y="-11"
-                      width={dest.country.length * 7.4 + 32}
-                      height="21"
-                      rx="10"
-                      fill={isRouteOption || isFlightTarget ? '#FDF9F0' : '#1F5A63'}
-                      stroke="#2B231D"
-                      strokeWidth="1.4"
-                    />
-                    <text
-                      textAnchor="middle"
-                      y="3.5"
-                      fontFamily="Nunito, sans-serif"
-                      fontWeight="800"
-                      fontSize="10.5"
-                      fill={isRouteOption || isFlightTarget ? '#2B231D' : '#FDF9F0'}
-                    >
-                      {dest.country}
-                    </text>
-                  </g>
-                )}
               </g>
             );
           })}
 
-          {/* Crew's Striped Hot-Air Balloon */}
-          <g transform={`translate(${balloonPos[0]}, ${balloonPos[1] - 24})`}>
+          {/* Collision-Free Label Pills with Leader Lines for Nearby Cities */}
+          <g style={{ pointerEvents: 'none' }}>
+            {placedLabels.map((box) => {
+              const dist = Math.hypot(box.lx - box.px, box.ly - box.py);
+              return (
+                <g key={`label-${box.id}`}>
+                  {dist > 25 && (
+                    <line
+                      x1={box.px}
+                      y1={box.py}
+                      x2={box.lx}
+                      y2={box.ly}
+                      stroke="#2B231D"
+                      strokeWidth="1.35"
+                      strokeDasharray="3 2.5"
+                      opacity="0.78"
+                    />
+                  )}
+                  <g transform={`translate(${box.lx}, ${box.ly})`}>
+                    <rect
+                      x={-box.w / 2}
+                      y={-box.h / 2}
+                      width={box.w}
+                      height={box.h}
+                      rx="11"
+                      fill={box.isHighlight ? '#FDF9F0' : '#1F5A63'}
+                      stroke="#2B231D"
+                      strokeWidth="1.5"
+                    />
+                    <text
+                      textAnchor="middle"
+                      y="3.8"
+                      fontFamily="Nunito, sans-serif"
+                      fontWeight="800"
+                      fontSize="10.8"
+                      fill={box.isHighlight ? '#2B231D' : '#FDF9F0'}
+                    >
+                      {box.text}
+                    </text>
+                  </g>
+                </g>
+              );
+            })}
+          </g>
+
+          {/* Crew's Striped Hot-Air Balloon with Tiny Crew Avatars Riding in the Basket! */}
+          <g transform={`translate(${balloonPos[0]}, ${balloonPos[1] - 28})`}>
             <g transform={`rotate(${flightVisuals.swayDeg.toFixed(1)})`}>
               <g className="balloon-bob">
                 {/* Soft ground shadow */}
                 <ellipse
                   cx="0"
-                  cy={flyingToId ? 30 : 24}
-                  rx={flyingToId ? 7 : 9}
-                  ry={flyingToId ? 2.5 : 3.5}
+                  cy={flyingToId ? 34 : 28}
+                  rx={flyingToId ? 8 : 10}
+                  ry={flyingToId ? 2.8 : 3.6}
                   fill="#2B231D"
                   opacity={flyingToId ? 0.14 : 0.22}
                 />
                 {/* Balloon Envelope */}
                 <path
-                  d="M0 -20 C-11 -20 -16 -12 -16 -3 C-16 5 -9 10 -5 14 L5 14 C9 10 16 5 16 -3 C16 -12 11 -20 0 -20 Z"
+                  d="M0 -24 C-12.5 -24 -18 -15 -18 -5 C-18 4 -10 9.5 -5.5 14 L5.5 14 C10 9.5 18 4 18 -5 C18 -15 12.5 -24 0 -24 Z"
                   fill="#C4533A"
                   stroke="#2B231D"
                   strokeWidth="2"
                 />
                 <path
-                  d="M0 -20 C-6 -20 -9 -12 -9 -3 C-9 5 -5 10 -3 14 L3 14 C5 10 9 5 9 -3 C9 -12 6 -20 0 -20 Z"
+                  d="M0 -24 C-6.5 -24 -10 -15 -10 -5 C-10 4 -5.5 9.5 -3 14 L3 14 C5.5 9.5 10 4 10 -5 C10 -15 6.5 -24 0 -24 Z"
                   fill="#FBF5E8"
                   stroke="#2B231D"
                   strokeWidth="1.6"
                 />
                 <path
-                  d="M0 -20 C-2 -12 -2.5 -3 -1.5 14 L1.5 14 C2.5 -3 2 -12 0 -20 Z"
+                  d="M0 -24 C-2.2 -15 -2.8 -5 -1.6 14 L1.6 14 C2.8 -5 2.2 -15 0 -24 Z"
                   fill="#C88A2B"
                 />
-                {/* Basket */}
-                <line x1="-3.5" y1="14" x2="-3" y2="18" stroke="#2B231D" strokeWidth="1.4" />
-                <line x1="3.5" y1="14" x2="3" y2="18" stroke="#2B231D" strokeWidth="1.4" />
+                {/* Basket Ropes */}
+                <line x1="-5" y1="14" x2="-8" y2="21" stroke="#2B231D" strokeWidth="1.35" />
+                <line x1="5" y1="14" x2="8" y2="21" stroke="#2B231D" strokeWidth="1.35" />
+                {/* Tiny Crew Avatars Peeking Above Basket Rim! */}
+                {basketAvatars.length > 0 && (
+                  <g>
+                    {basketAvatars.map((av, idx) => {
+                      const spread = basketAvatars.length === 1 ? 0 : 8.5;
+                      const xOff =
+                        idx * spread - ((basketAvatars.length - 1) * spread) / 2 - 6;
+                      return (
+                        <AnimalAvatar
+                          key={`balloon-av-${av}-${idx}`}
+                          avatar={av}
+                          size={12}
+                          x={xOff}
+                          y={11.5}
+                        />
+                      );
+                    })}
+                  </g>
+                )}
+                {/* Wicker Basket */}
                 <rect
-                  x="-5"
-                  y="17.5"
-                  width="10"
-                  height="5.5"
-                  rx="1.8"
+                  x={basketAvatars.length > 1 ? -11 : -7}
+                  y="20.5"
+                  width={basketAvatars.length > 1 ? 22 : 14}
+                  height="6.5"
+                  rx="2.2"
                   fill="#B67B3E"
                   stroke="#2B231D"
                   strokeWidth="1.6"
+                />
+                <line
+                  x1={basketAvatars.length > 1 ? -9.5 : -5.5}
+                  y1="23.8"
+                  x2={basketAvatars.length > 1 ? 9.5 : 5.5}
+                  y2="23.8"
+                  stroke="#7D5024"
+                  strokeWidth="1"
                 />
               </g>
             </g>

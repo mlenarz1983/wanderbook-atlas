@@ -1258,3 +1258,145 @@ p {
   transform-origin: center;
   animation: pulseRing 2.1s ease-out infinite;
 }
+
+/* ============================================================================
+   WANDERBOOK 3.0 — CITY ORIENTATION MAP, CULPRIT BADGE, BOLD TV CLUES & PAIRING
+   ============================================================================ */
+
+.culprit-badge {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: linear-gradient(135deg, #fdf9f0 0%, #f5e6cc 100%);
+  border: 2px solid rgba(43, 35, 29, 0.25);
+  border-radius: 16px;
+  box-shadow: 0 3px 8px rgba(43, 35, 29, 0.08);
+  transition: border-color 0.15s ease, transform 0.14s ease;
+}
+
+.culprit-badge:hover {
+  border-color: var(--terracotta);
+}
+
+.culprit-trait-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--ochre-soft);
+  border: 1.5px solid rgba(200, 138, 43, 0.55);
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.city-map-card {
+  background: var(--parchment-bright);
+  border: 2px solid rgba(43, 35, 29, 0.24);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(43, 35, 29, 0.08);
+}
+
+.city-map-card.compact {
+  border-width: 1.5px;
+}
+
+.city-map-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--parchment-deep);
+  border-bottom: 1.5px solid rgba(43, 35, 29, 0.16);
+  flex-wrap: wrap;
+}
+
+.city-map-svg-wrap {
+  width: 100%;
+  background: #f5e9d0;
+}
+
+.city-gmaps-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fdf9f0;
+  border: 1.5px solid rgba(31, 90, 99, 0.35);
+  color: var(--mariner-dark);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.city-gmaps-link:hover {
+  background: var(--mariner-soft);
+  border-color: var(--mariner);
+}
+
+.spot-gmaps-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: var(--parchment-bright);
+  border: 1.5px solid rgba(31, 90, 99, 0.28);
+  color: var(--mariner-dark);
+  text-decoration: none;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.spot-gmaps-btn:hover {
+  background: var(--mariner-soft);
+  border-color: var(--mariner);
+}
+
+/* Always-Bold, High-Contrast Clue Typography on TV Big Screen */
+.tv-clue-text {
+  font-size: 1.12rem;
+  font-weight: 900;
+  line-height: 1.42;
+  color: var(--ink);
+  background: var(--parchment-bright);
+  border: 1.5px solid rgba(43, 35, 29, 0.2);
+  border-left: 4px solid var(--terracotta);
+  border-radius: 12px;
+  padding: 9px 13px;
+}
+
+/* Two-Way TV Pairing Mode Tabs */
+.pairing-mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--parchment-deep);
+  border: 1.5px solid rgba(43, 35, 29, 0.18);
+}
+
+.pairing-mode-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  font-size: 0.86rem;
+  font-weight: 800;
+  color: var(--ink-soft);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.pairing-mode-tab.active {
+  background: var(--mariner);
+  color: #fdf9f0;
+  box-shadow: 0 2px 6px rgba(21, 66, 73, 0.25);
+}
+

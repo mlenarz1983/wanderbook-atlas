@@ -21,7 +21,39 @@ export type ContinentName =
 
 export type CaseKind = 'wonder-chase' | 'lost-explorer' | 'wildlife-trail';
 
-export type TownSpotId = 'harbor' | 'market' | 'archive';
+export type SpotRole = 'harbor' | 'market' | 'archive' | 'landmark' | 'nature';
+
+export type CityGeoBackdrop =
+  | 'river-ew'
+  | 'river-ns'
+  | 'coast-south'
+  | 'coast-west'
+  | 'coast-east'
+  | 'coast-north'
+  | 'harbor-bay'
+  | 'island'
+  | 'mountains-north'
+  | 'desert-oasis'
+  | 'glacier-fjord'
+  | 'rainforest-river';
+
+export interface CityLandmark {
+  id: string;
+  name: string; // Real, confirmed local place
+  role: SpotRole;
+  district: string; // e.g., "West Bank", "Old Town North", "Harborfront"
+  witnessTitle: string; // e.g., "Museum Curator", "Ferry Captain", "Spice Vendor"
+  x: number; // 12..88 normalized city map X (West -> East)
+  y: number; // 16..84 normalized city map Y (North -> South)
+  clockHours: number;
+}
+
+export interface CityLayout {
+  backdrop: CityGeoBackdrop;
+  waterLabel?: string;
+  featureLabel?: string;
+  landmarks: CityLandmark[];
+}
 
 export type SceneType =
   | 'geyser-viking'
@@ -108,7 +140,7 @@ export interface Destination {
   waterway: string;
   landform: string;
   climate: string;
-  borders: string[]; // bordering countries or "Island nation" / "Surrounded by ..."
+  borders: string[];
   animalName: string;
   animalAvatar: AvatarId;
   famousFood: string;
@@ -160,7 +192,7 @@ export interface SuspectProfile {
 }
 
 export interface WitnessClue {
-  spotId: TownSpotId;
+  spotId: string;
   spotTitle: string;
   witnessName: string;
   destinationClue: string;
@@ -171,7 +203,7 @@ export interface WitnessClue {
 
 export interface TownClueLogEntry {
   cityId: string;
-  spotId: TownSpotId;
+  spotId: string;
   spotTitle: string;
   witnessName: string;
   destinationClue: string;
@@ -185,15 +217,15 @@ export interface CaseMission {
   briefing: string;
   stolenOrTargetItem: string;
   culpritId: string;
-  suspectIds: string[]; // 4 suspects in the dossier
-  trailDestIds: string[]; // Ordered true path (length 4-7)
-  trailProgressIndex: number; // Furthest valid trail stop reached (0 .. trailDestIds.length - 1)
-  currentDestId: string; // Can be off-trail if on a Cold Trail!
+  suspectIds: string[];
+  trailDestIds: string[];
+  trailProgressIndex: number;
+  currentDestId: string;
   isOnColdTrail: boolean;
   lastValidDestId: string;
-  departureOptions: string[]; // 5 plausible candidate destinations from current valid stop
-  visitedDestIds: string[]; // Full ordered flight log
-  investigatedSpotsByCity: Record<string, TownSpotId[]>;
+  departureOptions: string[];
+  visitedDestIds: string[];
+  investigatedSpotsByCity: Record<string, string[]>;
   cluesLog: TownClueLogEntry[];
   discoveredSuspectTraits: Partial<
     Record<'accessory' | 'favoriteTreat' | 'companion' | 'hobby', string>
@@ -245,11 +277,13 @@ export interface LiveSessionState {
   discoveredDestIds: string[];
   flippedHistoryIds: string[];
   turnPhase: TurnPhase;
-  activeSpotId: TownSpotId | null;
+  activeSpotId: string | null;
+  lastVisitedSpotId: string | null;
   activeQuestion: QuizQuestion | null;
   latestWitnessClue: WitnessClue | null;
   flyingFromId: string | null;
   flyingToId: string | null;
+  flightDurationMs: number;
   activeLevel: DifficultyLevel;
   crewHelped: boolean;
   triedChoiceIndices: number[];

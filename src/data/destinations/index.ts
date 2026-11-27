@@ -2,6 +2,9 @@ import type { ContinentName, Destination } from '../../types/game';
 import { AFRICA_DESTINATIONS } from './africa';
 import { ASIA_DESTINATIONS } from './asia';
 import { EUROPE_DESTINATIONS } from './europe';
+import { MORE_AMERICAS_OCEANIA } from './moreAmericasOceania';
+import { MORE_ASIA } from './moreAsia';
+import { MORE_EUROPE_AFRICA } from './moreEuropeAfrica';
 import { NORTH_AMERICA_DESTINATIONS } from './northAmerica';
 import { OCEANIA_ANTARCTICA_DESTINATIONS } from './oceaniaAntarctica';
 import { SOUTH_AMERICA_DESTINATIONS } from './southAmerica';
@@ -13,6 +16,9 @@ export const DESTINATIONS: Destination[] = [
   ...NORTH_AMERICA_DESTINATIONS,
   ...SOUTH_AMERICA_DESTINATIONS,
   ...OCEANIA_ANTARCTICA_DESTINATIONS,
+  ...MORE_EUROPE_AFRICA,
+  ...MORE_ASIA,
+  ...MORE_AMERICAS_OCEANIA,
 ];
 
 export const DESTINATIONS_BY_ID: Record<string, Destination> = Object.fromEntries(
@@ -45,23 +51,42 @@ export function computeDistanceMiles(
   return Math.max(250, Math.round(miles / 10) * 10);
 }
 
-/** Flight time on the Travel Clock (8h to 24h based on real-world distance) */
+/** Flight time on the Travel Clock (6h to 28h scaled accurately to real miles) */
 export function computeFlightHours(fromId: string, toId: string): number {
   const a = DESTINATIONS_BY_ID[fromId];
   const b = DESTINATIONS_BY_ID[toId];
   if (!a || !b) return 12;
   const miles = computeDistanceMiles(a.coords, b.coords);
-  if (miles < 1200) return 8;
-  if (miles < 2800) return 12;
-  if (miles < 5000) return 16;
-  if (miles < 7500) return 20;
-  return 24;
+  if (miles < 700) return 6;
+  if (miles < 1400) return 9;
+  if (miles < 2600) return 12;
+  if (miles < 4200) return 16;
+  if (miles < 6200) return 20;
+  if (miles < 8500) return 24;
+  return 28;
 }
 
 /**
- * Generates 5 plausible flight destinations from `currentId`:
- * 1 true next destination + 4 genuinely plausible decoys (mix of nearby regional
- * neighbors + visually similar countries so players must actually use their clues!).
+ * Distance-accurate animated flight duration (milliseconds)!
+ * Short regional hop (~400mi) -> ~3.2s (snappy & breezy!)
+ * Medium hop (~2,200mi)       -> ~5.8s
+ * Ocean crossing (~4,800mi)   -> ~8.6s
+ * Halfway around Earth (8,500+mi) -> ~12.5s (epic voyage!)
+ */
+export function computeFlightAnimationMs(fromId: string, toId: string): number {
+  const a = DESTINATIONS_BY_ID[fromId];
+  const b = DESTINATIONS_BY_ID[toId];
+  if (!a || !b) return 6500;
+  const miles = computeDistanceMiles(a.coords, b.coords);
+  const scaled = Math.round(2800 + Math.min(miles, 10000) * 0.98);
+  return Math.max(3000, Math.min(12600, scaled));
+}
+
+/**
+ * Generates 5 SPREAD-OUT, plausible flight destinations from `currentId`:
+ * 1 true next destination + 4 genuinely plausible decoys spaced at least ~1,300 miles
+ * apart from EACH OTHER (and from `currentId`) so labels never cluster on the TV map
+ * and every round gives awesome global variety!
  */
 export function buildDepartureBoard(
   currentId: string,
@@ -69,6 +94,7 @@ export function buildDepartureBoard(
   alreadyVisitedIds: string[]
 ): string[] {
   const target = DESTINATIONS_BY_ID[trueNextId];
+  const origin = DESTINATIONS_BY_ID[currentId];
   if (!target) return [trueNextId];
 
   const excluded = new Set<string>([currentId, trueNextId, ...alreadyVisitedIds]);
@@ -76,41 +102,47 @@ export function buildDepartureBoard(
     (d) => !excluded.has(d.id) && d.country !== target.country
   );
 
-  // Rank candidates: 2 plausible regional/same-continent decoys + 2 global/similar-biome decoys
-  const sameContinent = candidates
-    .filter((d) => d.continent === target.continent)
-    .sort((a, b) => {
-      const da = computeDistanceMiles(target.coords, a.coords);
-      const db = computeDistanceMiles(target.coords, b.coords);
-      return da - db;
-    });
+  const chosen: Destination[] = [target];
+  const usedCountries = new Set<string>([target.country]);
 
-  const otherContinent = candidates
+  const isWellSpaced = (cand: Destination, minMiles: number): boolean => {
+    if (origin && computeDistanceMiles(origin.coords, cand.coords) < minMiles * 0.65) {
+      return false;
+    }
+    return chosen.every(
+      (existing) => computeDistanceMiles(existing.coords, cand.coords) >= minMiles
+    );
+  };
+
+  // Pick 1–2 spread-out same-continent (or adjacent) decoys + 2–3 other-continent decoys
+  const sameCont = candidates
+    .filter((d) => d.continent === target.continent)
+    .sort(() => Math.random() - 0.5);
+  const diffCont = candidates
     .filter((d) => d.continent !== target.continent)
     .sort(() => Math.random() - 0.5);
 
-  const decoys: string[] = [];
-  const usedCountries = new Set<string>([target.country]);
-
-  const tryAdd = (pool: Destination[], maxAdd: number) => {
+  const pickFrom = (pool: Destination[], maxAdd: number, minMiles: number) => {
     let added = 0;
-    // Shuffle slightly among top candidates so decoys vary every game
-    const slice = pool.slice(0, Math.min(pool.length, 10)).sort(() => Math.random() - 0.5);
-    for (const d of slice) {
-      if (added >= maxAdd || decoys.length >= 4) break;
-      if (!usedCountries.has(d.country)) {
-        decoys.push(d.id);
+    for (const d of pool) {
+      if (added >= maxAdd || chosen.length >= 5) break;
+      if (!usedCountries.has(d.country) && isWellSpaced(d, minMiles)) {
+        chosen.push(d);
         usedCountries.add(d.country);
         added++;
       }
     }
   };
 
-  tryAdd(sameContinent, 2);
-  tryAdd(otherContinent, 2);
-  if (decoys.length < 4) {
-    tryAdd(candidates, 4 - decoys.length);
+  // Prefer at least 1,400 miles between every pair of candidate pins so the TV map stays crisp!
+  pickFrom(sameCont, 1, 1300);
+  pickFrom(diffCont, 3, 1800);
+  if (chosen.length < 5) {
+    pickFrom(candidates.sort(() => Math.random() - 0.5), 5 - chosen.length, 1000);
+  }
+  if (chosen.length < 5) {
+    pickFrom(candidates, 5 - chosen.length, 0);
   }
 
-  return [trueNextId, ...decoys].sort(() => Math.random() - 0.5);
+  return chosen.map((d) => d.id).sort(() => Math.random() - 0.5);
 }
