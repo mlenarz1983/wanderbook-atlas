@@ -1,78 +1,58 @@
 import { useState } from 'react';
-import { Compass, X } from 'lucide-react';
-import type { MissionTheme, Player } from '../types/game';
+import { Compass, ShieldCheck, X } from 'lucide-react';
+import type { CaseKind, Player } from '../types/game';
 import { AnimalAvatar } from './art/AnimalAvatar';
 
 interface NewMissionModalProps {
   players: Player[];
   onCreate: (params: {
-    title: string;
-    theme: MissionTheme;
-    targetStops: number | null;
+    title?: string;
+    kind: CaseKind | 'random';
+    stopsCount: number;
     playerIds: string[];
-    startDestId: string;
   }) => void;
   onClose: () => void;
 }
 
-const THEMES: { id: MissionTheme; title: string; desc: string; defaultTitle: string; startId: string }[] = [
+const CASE_TYPES: { id: CaseKind | 'random'; title: string; desc: string }[] = [
   {
-    id: 'grand-tour',
-    title: 'Grand World Tour',
-    desc: 'A joyful mix of cute animals, landmarks, oceans, and stories.',
-    defaultTitle: 'Family World Tour',
-    startId: 'iceland',
+    id: 'random',
+    title: 'Rotating Mystery Case (Surprise!)',
+    desc: 'Draws a fresh random story—either a Stolen Wonder Chase, Lost Explorer, or Rare Wildlife Trail!',
   },
   {
-    id: 'animal-safari',
-    title: 'Wild Animal Safari',
-    desc: 'Follow pandas, sea turtles, penguins, lions, and butterflies!',
-    defaultTitle: 'Wild Animal Safari',
-    startId: 'tanzania',
+    id: 'wonder-chase',
+    title: 'Stolen World Wonder Chase',
+    desc: 'Classic Carmen Sandiego! Track a mischievous thief, gather clues in town, and issue a Warrant.',
   },
   {
-    id: 'time-travel',
-    title: 'Time-Travel Wonders',
-    desc: 'Pyramids, Vikings, ancient chocolate, kites, and star navigators!',
-    defaultTitle: 'Time-Travel Wonders',
-    startId: 'egypt',
+    id: 'lost-explorer',
+    title: 'Lost Explorer Rescue',
+    desc: 'Follow field notes across harbors, markets & archives to locate a stranded Wanderbook explorer.',
   },
   {
-    id: 'open-atlas',
-    title: 'Open Atlas Roam',
-    desc: 'No finish line—fly anywhere curiosity pulls your crew!',
-    defaultTitle: 'Open Atlas Adventure',
-    startId: 'grand-canyon',
+    id: 'wildlife-trail',
+    title: 'Rare Wildlife Migration',
+    desc: 'Track a legendary migrating creature across continents before the seasonal window closes!',
   },
 ];
 
-const STOP_OPTIONS: { label: string; value: number | null; sub: string }[] = [
-  { label: '5 Stops', value: 5, sub: '~10 min' },
-  { label: '8 Stops', value: 8, sub: '~15 min' },
-  { label: '12 Stops', value: 12, sub: '~25 min' },
-  { label: 'Endless', value: null, sub: 'Free roam' },
+const LENGTH_OPTIONS: { label: string; stops: number; sub: string }[] = [
+  { label: 'Quick Case', stops: 4, sub: '4 Cities • 9 Days' },
+  { label: 'Classic Case', stops: 5, sub: '5 Cities • 12 Days' },
+  { label: 'Epic Chase', stops: 7, sub: '7 Cities • 17 Days' },
 ];
 
 export function NewMissionModal({ players, onCreate, onClose }: NewMissionModalProps) {
-  const [theme, setTheme] = useState<MissionTheme>('grand-tour');
-  const [title, setTitle] = useState('Family World Tour');
-  const [targetStops, setTargetStops] = useState<number | null>(8);
+  const [kind, setKind] = useState<CaseKind | 'random'>('random');
+  const [customTitle, setCustomTitle] = useState('');
+  const [stopsCount, setStopsCount] = useState<number>(5);
   const [selectedIds, setSelectedIds] = useState<string[]>(players.map((p) => p.id));
-
-  const handleThemePick = (t: (typeof THEMES)[number]) => {
-    setTheme(t.id);
-    setTitle(t.defaultTitle);
-    if (t.id === 'open-atlas') {
-      setTargetStops(null);
-    } else if (targetStops === null) {
-      setTargetStops(8);
-    }
-  };
 
   const togglePlayer = (id: string) => {
     setSelectedIds((prev) => {
       if (prev.includes(id)) {
-        if (prev.length === 1) return prev; // Keep at least 1 explorer
+        if (prev.length === 1) return prev;
         return prev.filter((x) => x !== id);
       }
       return [...prev, id];
@@ -81,13 +61,11 @@ export function NewMissionModal({ players, onCreate, onClose }: NewMissionModalP
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const themeObj = THEMES.find((t) => t.id === theme) ?? THEMES[0];
     onCreate({
-      title: title.trim() || themeObj.defaultTitle,
-      theme,
-      targetStops,
+      title: customTitle.trim() || undefined,
+      kind,
+      stopsCount,
       playerIds: selectedIds.length > 0 ? selectedIds : [players[0].id],
-      startDestId: themeObj.startId,
     });
   };
 
@@ -98,38 +76,31 @@ export function NewMissionModal({ players, onCreate, onClose }: NewMissionModalP
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Start New Expedition"
+        aria-label="Open a New Mystery Case"
       >
         <div className="section-header" style={{ marginBottom: 16 }}>
           <h2 style={{ fontSize: '1.45rem', display: 'flex', alignItems: 'center', gap: 9 }}>
-            <Compass size={24} color="var(--terracotta)" /> Start a New Expedition
+            <ShieldCheck size={24} color="var(--terracotta)" /> Open a New Mystery Case
           </h2>
           <button type="button" className="btn btn-ghost" onClick={onClose} aria-label="Close">
             <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          {/* Mission Theme */}
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>1. Pick an Adventure Theme</div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                gap: 10,
-              }}
-            >
-              {THEMES.map((t) => {
-                const active = theme === t.id;
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>1. Choose Case Style</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+              {CASE_TYPES.map((t) => {
+                const active = kind === t.id;
                 return (
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => handleThemePick(t)}
+                    onClick={() => setKind(t.id)}
                     style={{
                       textAlign: 'left',
-                      padding: '12px 14px',
+                      padding: '11px 13px',
                       borderRadius: 14,
                       background: active ? 'var(--mariner-soft)' : 'var(--parchment-bright)',
                       border: active
@@ -137,10 +108,10 @@ export function NewMissionModal({ players, onCreate, onClose }: NewMissionModalP
                         : '1.5px solid rgba(43,35,29,0.18)',
                     }}
                   >
-                    <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.02rem' }}>
+                    <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.98rem' }}>
                       {t.title}
                     </div>
-                    <div style={{ fontSize: '0.82rem', color: 'var(--ink-soft)', marginTop: 4, lineHeight: 1.35 }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--ink-soft)', marginTop: 4, lineHeight: 1.35 }}>
                       {t.desc}
                     </div>
                   </button>
@@ -149,33 +120,16 @@ export function NewMissionModal({ players, onCreate, onClose }: NewMissionModalP
             </div>
           </div>
 
-          {/* Expedition Title */}
           <div>
-            <label htmlFor="mission-title-input" style={{ display: 'block', fontWeight: 800, marginBottom: 6 }}>
-              2. Name This Save Slot
-            </label>
-            <input
-              id="mission-title-input"
-              className="input-field"
-              type="text"
-              maxLength={32}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Friday Night World Tour"
-            />
-          </div>
-
-          {/* Trip Length */}
-          <div>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>3. Trip Length</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
-              {STOP_OPTIONS.map((opt) => {
-                const active = targetStops === opt.value;
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>2. Trail Length & Travel Clock</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+              {LENGTH_OPTIONS.map((opt) => {
+                const active = stopsCount === opt.stops;
                 return (
                   <button
                     key={opt.label}
                     type="button"
-                    onClick={() => setTargetStops(opt.value)}
+                    onClick={() => setStopsCount(opt.stops)}
                     style={{
                       padding: '10px 8px',
                       borderRadius: 12,
@@ -188,16 +142,30 @@ export function NewMissionModal({ players, onCreate, onClose }: NewMissionModalP
                     }}
                   >
                     <div style={{ fontWeight: 800, fontSize: '0.94rem' }}>{opt.label}</div>
-                    <div style={{ fontSize: '0.74rem', opacity: active ? 0.9 : 0.7 }}>{opt.sub}</div>
+                    <div style={{ fontSize: '0.75rem', opacity: active ? 0.92 : 0.72 }}>{opt.sub}</div>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Crew Selection */}
           <div>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>4. Who’s Aboard the Balloon?</div>
+            <label htmlFor="mission-title-input" style={{ display: 'block', fontWeight: 800, marginBottom: 6 }}>
+              3. Custom Save Name <span style={{ fontWeight: 600, color: 'var(--ink-muted)' }}>(optional — leave blank for auto-title)</span>
+            </label>
+            <input
+              id="mission-title-input"
+              className="input-field"
+              type="text"
+              maxLength={38}
+              value={customTitle}
+              onChange={(e) => setCustomTitle(e.target.value)}
+              placeholder="e.g., Friday Night Detective Crew"
+            />
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>4. Who’s On the Case?</div>
             <div className="crew-row">
               {players.map((p) => {
                 const included = selectedIds.includes(p.id);
@@ -223,7 +191,7 @@ export function NewMissionModal({ players, onCreate, onClose }: NewMissionModalP
                     <div style={{ textAlign: 'left' }}>
                       <div style={{ fontWeight: 800, fontSize: '0.92rem' }}>{p.name}</div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--ink-soft)', fontWeight: 700 }}>
-                        {included ? 'Joining' : 'Tap to join'}
+                        {included ? 'On the team' : 'Tap to join'}
                       </div>
                     </div>
                   </button>
@@ -237,7 +205,7 @@ export function NewMissionModal({ players, onCreate, onClose }: NewMissionModalP
               Cancel
             </button>
             <button type="submit" className="btn btn-terracotta btn-lg">
-              Launch Balloon!
+              <Compass size={19} /> Launch Case!
             </button>
           </div>
         </form>

@@ -20,7 +20,7 @@ export function TimeFlipPostcard({
   isNewDiscovery = false,
   large = false,
 }: TimeFlipPostcardProps) {
-  const { postcard } = destination;
+  const [m0, m1] = destination.history;
 
   return (
     <div className="postcard-scene-wrap">
@@ -40,7 +40,7 @@ export function TimeFlipPostcard({
               >
                 <div>
                   <div className="stamp-label" style={{ color: 'var(--terracotta)' }}>
-                    {isNewDiscovery ? '★ NEW PASSPORT STAMP' : 'AIRMAIL POSTCARD'} • {destination.continent}
+                    {isNewDiscovery ? '★ NEW PASSPORT STAMP' : 'AIRMAIL POSTCARD'} • {destination.subregion}
                   </div>
                   <h3 style={{ fontSize: large ? '1.65rem' : '1.26rem', marginTop: 2 }}>
                     {destination.name}
@@ -52,7 +52,7 @@ export function TimeFlipPostcard({
                     className="btn btn-secondary btn-sm"
                     onClick={() =>
                       onReadAloud(
-                        `${destination.name}, ${destination.country}. ${postcard.headline} ${postcard.todayFact}`
+                        `${destination.name}, ${destination.country}. ${destination.worldWonder}. ${destination.todayFact}`
                       )
                     }
                     title="Read postcard aloud"
@@ -70,22 +70,22 @@ export function TimeFlipPostcard({
                   style={{
                     fontFamily: 'var(--font-display)',
                     fontWeight: 700,
-                    fontSize: large ? '1.22rem' : '1.05rem',
+                    fontSize: large ? '1.18rem' : '1.02rem',
                     color: 'var(--mariner-dark)',
                     marginBottom: 4,
                   }}
                 >
-                  {postcard.headline}
+                  {destination.worldWonder}
                 </div>
                 <p
                   style={{
-                    fontSize: large ? '1.05rem' : '0.92rem',
-                    lineHeight: 1.5,
+                    fontSize: large ? '1.02rem' : '0.9rem',
+                    lineHeight: 1.48,
                     color: 'var(--ink-soft)',
                     fontWeight: 600,
                   }}
                 >
-                  {postcard.todayFact}
+                  {destination.todayFact}
                 </p>
               </div>
 
@@ -110,7 +110,7 @@ export function TimeFlipPostcard({
                     <div className="stamp-label" style={{ color: 'var(--ochre-dark)', fontSize: '0.7rem' }}>
                       SOUVENIR COLLECTED
                     </div>
-                    <div style={{ fontWeight: 800, fontSize: large ? '1.05rem' : '0.95rem' }}>
+                    <div style={{ fontWeight: 800, fontSize: large ? '1.02rem' : '0.94rem' }}>
                       {destination.souvenirName}
                     </div>
                   </div>
@@ -129,19 +129,18 @@ export function TimeFlipPostcard({
           </div>
         </div>
 
-        {/* BACK FACE — TIME-FLIP HISTORY STORY */}
+        {/* BACK FACE — TWO REAL HISTORICAL MILESTONES */}
         <div className="postcard-face postcard-back">
           <div className="airmail-frame" style={{ height: '100%' }}>
             <div
               className="airmail-inner"
               style={{
-                padding: large ? 26 : 18,
-                background:
-                  'linear-gradient(180deg, #FBF2DE 0%, #F2E2BE 100%)',
+                padding: large ? 24 : 16,
+                background: 'linear-gradient(180deg, #FBF2DE 0%, #F2E2BE 100%)',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
-                gap: 14,
+                gap: 12,
               }}
             >
               <div
@@ -162,50 +161,49 @@ export function TimeFlipPostcard({
                       gap: 5,
                     }}
                   >
-                    <Sparkles size={14} /> TIME-FLIP POSTCARD • {postcard.timeEra}
+                    <Sparkles size={14} /> TIME-FLIP ARCHIVE • {destination.country}
                   </div>
-                  <h3 style={{ fontSize: large ? '1.75rem' : '1.35rem', marginTop: 4 }}>
-                    {postcard.historyTitle}
+                  <h3 style={{ fontSize: large ? '1.55rem' : '1.22rem', marginTop: 3 }}>
+                    {m0.title}
                   </h3>
                 </div>
-                <div className="ink-stamp-circle" style={{ flexShrink: 0 }}>
+                <div className="ink-stamp-circle" style={{ flexShrink: 0, width: 70, height: 70 }}>
                   <span>{destination.country.slice(0, 10)}</span>
-                  <span style={{ fontSize: '0.58rem', marginTop: 2 }}>{postcard.timeEra}</span>
+                  <span style={{ fontSize: '0.55rem', marginTop: 2 }}>{m0.era}</span>
                 </div>
               </div>
 
-              {/* Vintage Postcard Ruled Writing Area */}
+              {/* Dual Historical Stories */}
               <div
                 style={{
-                  background: 'rgba(253, 249, 240, 0.78)',
+                  background: 'rgba(253, 249, 240, 0.82)',
                   border: '1.5px dashed rgba(43, 35, 29, 0.25)',
                   borderRadius: 14,
-                  padding: large ? '20px 22px' : '14px 16px',
+                  padding: large ? '16px 18px' : '12px 14px',
                   flex: 1,
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'center',
                   gap: 10,
+                  overflowY: 'auto',
                 }}
               >
-                <p
-                  style={{
-                    fontSize: large ? '1.22rem' : '1.02rem',
-                    lineHeight: 1.6,
-                    color: 'var(--ink)',
-                    fontWeight: 700,
-                  }}
-                >
-                  “{postcard.historyFact}”
-                </p>
-                <div
-                  style={{
-                    fontSize: '0.86rem',
-                    color: 'var(--ink-soft)',
-                    fontFamily: 'var(--font-stamp)',
-                  }}
-                >
-                  — From the Wanderbook Time-Travel Archive ({destination.name})
+                <div>
+                  <div className="stamp-label" style={{ color: 'var(--mariner)', fontSize: '0.7rem' }}>
+                    {m0.era} — {m0.title}
+                  </div>
+                  <p style={{ fontSize: large ? '1.02rem' : '0.88rem', lineHeight: 1.48, fontWeight: 700, marginTop: 2 }}>
+                    {m0.fact}
+                  </p>
+                </div>
+
+                <div style={{ borderTop: '1px dashed rgba(43,35,29,0.2)', paddingTop: 8 }}>
+                  <div className="stamp-label" style={{ color: 'var(--ochre-dark)', fontSize: '0.7rem' }}>
+                    {m1.era} — {m1.title}
+                  </div>
+                  <p style={{ fontSize: large ? '1.02rem' : '0.88rem', lineHeight: 1.48, fontWeight: 700, marginTop: 2 }}>
+                    {m1.fact}
+                  </p>
                 </div>
               </div>
 
@@ -224,11 +222,11 @@ export function TimeFlipPostcard({
                     className="btn btn-secondary btn-sm"
                     onClick={() =>
                       onReadAloud(
-                        `${postcard.timeEra}. ${postcard.historyTitle}. ${postcard.historyFact}`
+                        `${m0.era}. ${m0.title}. ${m0.fact} Also, ${m1.era}: ${m1.title}. ${m1.fact}`
                       )
                     }
                   >
-                    <Volume2 size={16} /> Read Story Aloud
+                    <Volume2 size={16} /> Read Stories Aloud
                   </button>
                 ) : (
                   <span />

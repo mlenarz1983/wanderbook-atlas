@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Award,
   BookOpen,
+  Clock,
   Compass,
   Play,
   Plus,
   Settings,
+  ShieldCheck,
   Trash2,
   Tv,
   Unlink,
@@ -14,28 +16,36 @@ import {
 import { AnimalAvatar } from './components/art/AnimalAvatar';
 import { BalloonEmblem } from './components/art/CompassRose';
 import { SouvenirArt } from './components/art/SouvenirArt';
+import { CaseNotebookModal } from './components/CaseNotebookModal';
 import { CrewModal } from './components/CrewModal';
 import { ExpeditionScreen } from './components/ExpeditionScreen';
+import { FieldGuideModal } from './components/FieldGuideModal';
 import { FLIGHT_DURATION_MS } from './components/FlightJourneyCard';
 import { NewMissionModal } from './components/NewMissionModal';
 import { PassportView } from './components/PassportView';
 import { SettingsModal } from './components/SettingsModal';
 import { TvConnectModal } from './components/TvConnectModal';
 import { TvDisplayScreen } from './components/TvDisplayScreen';
+import { SUSPECTS_BY_ID } from './data/cases';
 import {
   DESTINATIONS,
   DESTINATIONS_BY_ID,
-  getSuggestedNextRoutes,
+  buildDepartureBoard,
+  computeFlightHours,
 } from './data/destinations';
+import { generateWitnessClue, selectSpotQuestion } from './engine/questionEngine';
 import type {
   AvatarId,
+  CaseKind,
+  CaseMission,
   DifficultyLevel,
   LiveSessionState,
-  Mission,
-  MissionTheme,
   Player,
+  QuizQuestion,
   SavedAtlasState,
+  TownSpotId,
   TurnPhase,
+  WitnessClue,
 } from './types/game';
 import {
   playCardFlip,
@@ -49,8 +59,9 @@ import {
   stopSpeaking,
 } from './utils/audio';
 import {
-  createMission,
+  createCaseMission,
   createPlayer,
+  formatTravelClock,
   loadSavedState,
   persistState,
 } from './utils/storage';
@@ -75,25 +86,34 @@ export function App() {
   // Persistent Family Atlas State (Tablet = Keeper of the Passport)
   const [savedState, setSavedState] = useState<SavedAtlasState>(() => loadSavedState());
 
-  // Navigation & Mode State
+  // Navigation & Modals
   const [isTvDisplayMode, setIsTvDisplayMode] = useState<boolean>(urlInit.isTv);
   const [screen, setScreen] = useState<'home' | 'expedition'>('home');
   const [passportOpen, setPassportOpen] = useState(false);
   const [passportHighlightId, setPassportHighlightId] = useState<string | null>(null);
+  const [fieldGuideOpen, setFieldGuideOpen] = useState(false);
+  const [fieldGuideCompareIds, setFieldGuideCompareIds] = useState<string[]>([]);
+  const [notebookOpen, setNotebookOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newMissionOpen, setNewMissionOpen] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState<Player | 'new' | null>(null);
 
-  // Live Expedition Turn State
-  const [turnPhase, setTurnPhase] = useState<TurnPhase>('choose-route');
+  // Live Case Turn State
+  const [turnPhase, setTurnPhase] = useState<TurnPhase>('town-hub');
+  const [activeSpotId, setActiveSpotId] = useState<TownSpotId | null>(null);
+  const [activeQuestion, setActiveQuestion] = useState<QuizQuestion | null>(null);
+  const [latestWitnessClue, setLatestWitnessClue] = useState<WitnessClue | null>(null);
   const [flyingFromId, setFlyingFromId] = useState<string | null>(null);
-  const [pendingDestId, setPendingDestId] = useState<string | null>(null);
-  const [activeLevel, setActiveLevel] = useState<DifficultyLevel>('scout');
+  const [flyingToId, setFlyingToId] = useState<string | null>(null);
+  const [flyingIsReturn, setFlyingIsReturn] = useState(false);
+  const [activeLevel, setActiveLevel] = useState<DifficultyLevel>('explorer');
   const [crewHelped, setCrewHelped] = useState(false);
   const [triedChoiceIndices, setTriedChoiceIndices] = useState<number[]>([]);
   const [showGentleHint, setShowGentleHint] = useState(false);
+  const [postcardDestId, setPostcardDestId] = useState<string | null>(null);
   const [postcardFlipped, setPostcardFlipped] = useState(false);
   const [celebratingNewDiscovery, setCelebratingNewDiscovery] = useState(false);
+  const [warrantFeedback, setWarrantFeedback] = useState<string | null>(null);
 
   // TV Pairing (Android Tablet -> Google TV Streamer)
   const [tvModalOpen, setTvModalOpen] = useState<boolean>(Boolean(urlInit.joinCode));
@@ -108,7 +128,6 @@ export function App() {
     persistState(savedState);
   }, [savedState]);
 
-  // Clean up timers & peer connections on unmount
   useEffect(() => {
     return () => {
       if (flyTimerRef.current) window.clearTimeout(flyTimerRef.current);
@@ -118,7 +137,7 @@ export function App() {
 
   const soundOn = savedState.preferences.soundEnabled;
 
-  const activeMission: Mission | null = useMemo(
+  const activeMission: CaseMission | null = useMemo(
     () => savedState.missions.find((m) => m.id === savedState.activeMissionId) ?? null,
     [savedState.missions, savedState.activeMissionId]
   );
@@ -141,16 +160,7 @@ export function App() {
     return missionPlayers[(activeMission.currentTurnIndex + 1) % missionPlayers.length];
   }, [activeMission, missionPlayers, savedState.players]);
 
-  const routeOptions: string[] = useMemo(() => {
-    if (!activeMission) return [];
-    return getSuggestedNextRoutes(
-      activeMission.currentDestId,
-      activeMission.visitedDestIds,
-      activeMission.theme
-    );
-  }, [activeMission]);
-
-  // Construct LiveSessionState and stream to paired TV whenever anything changes
+  // Live TV Sync Payload
   const liveSessionState: LiveSessionState = useMemo(
     () => ({
       screen: passportOpen ? 'passport' : screen,
@@ -159,13 +169,16 @@ export function App() {
       discoveredDestIds: savedState.discoveredDestIds,
       flippedHistoryIds: savedState.flippedHistoryIds,
       turnPhase,
-      routeOptions,
+      activeSpotId,
+      activeQuestion,
+      latestWitnessClue,
       flyingFromId,
-      pendingDestId,
+      flyingToId,
       activeLevel,
       crewHelped,
       triedChoiceIndices,
       showGentleHint,
+      postcardDestId,
       postcardFlipped,
       celebratingNewDiscovery,
       passportHighlightId,
@@ -178,13 +191,16 @@ export function App() {
       savedState.discoveredDestIds,
       savedState.flippedHistoryIds,
       turnPhase,
-      routeOptions,
+      activeSpotId,
+      activeQuestion,
+      latestWitnessClue,
       flyingFromId,
-      pendingDestId,
+      flyingToId,
       activeLevel,
       crewHelped,
       triedChoiceIndices,
       showGentleHint,
+      postcardDestId,
       postcardFlipped,
       celebratingNewDiscovery,
       passportHighlightId,
@@ -197,7 +213,6 @@ export function App() {
     }
   }, [tvConnectedCode, liveSessionState]);
 
-  // Connect Tablet to TV handler
   const handleConnectToTv = useCallback(
     (code: string) => {
       const clean = normalizeRoomCode(code);
@@ -214,9 +229,7 @@ export function App() {
           setTvError(null);
           playDiscoveryFanfare(soundOn);
         },
-        onDisconnected: () => {
-          setTvConnectedCode(null);
-        },
+        onDisconnected: () => setTvConnectedCode(null),
         onError: (msg) => {
           setTvConnecting(false);
           setTvError(msg);
@@ -233,8 +246,8 @@ export function App() {
     setTvConnectedCode(null);
   };
 
-  // Start or Resume an Expedition
-  const openMission = (mission: Mission) => {
+  // Open or Resume a Mystery Case
+  const openMission = (mission: CaseMission) => {
     stopSpeaking();
     playClick(soundOn);
     const pilotId =
@@ -251,32 +264,43 @@ export function App() {
     }));
 
     setActiveLevel(pilot.defaultLevel);
+    setActiveSpotId(null);
+    setActiveQuestion(null);
+    setLatestWitnessClue(null);
     setFlyingFromId(null);
-    setPendingDestId(null);
+    setFlyingToId(null);
+    setFlyingIsReturn(false);
     setCrewHelped(false);
     setTriedChoiceIndices([]);
     setShowGentleHint(false);
+    setPostcardDestId(null);
     setPostcardFlipped(false);
-    setCelebratingNewDiscovery(false);
-    setTurnPhase(mission.completed ? 'mission-complete' : 'choose-route');
+    setWarrantFeedback(null);
+
+    if (mission.status !== 'active') {
+      setTurnPhase('case-complete');
+    } else if (mission.isOnColdTrail) {
+      setTurnPhase('cold-trail');
+    } else {
+      setTurnPhase('town-hub');
+    }
     setScreen('expedition');
   };
 
   const handleCreateMission = (params: {
-    title: string;
-    theme: MissionTheme;
-    targetStops: number | null;
+    title?: string;
+    kind: CaseKind | 'random';
+    stopsCount: number;
     playerIds: string[];
-    startDestId: string;
   }) => {
-    const mission = createMission(params);
+    const mission = createCaseMission(params);
     setSavedState((prev) => ({
       ...prev,
       missions: [mission, ...prev.missions],
       activeMissionId: mission.id,
-      discoveredDestIds: prev.discoveredDestIds.includes(params.startDestId)
+      discoveredDestIds: prev.discoveredDestIds.includes(mission.currentDestId)
         ? prev.discoveredDestIds
-        : [...prev.discoveredDestIds, params.startDestId],
+        : [...prev.discoveredDestIds, mission.currentDestId],
     }));
     setNewMissionOpen(false);
 
@@ -284,13 +308,19 @@ export function App() {
       savedState.players.find((p) => p.id === mission.playerIds[0]) ??
       savedState.players[0];
     setActiveLevel(firstPilot.defaultLevel);
+    setActiveSpotId(null);
+    setActiveQuestion(null);
+    setLatestWitnessClue(null);
     setFlyingFromId(null);
-    setPendingDestId(null);
+    setFlyingToId(null);
+    setFlyingIsReturn(false);
     setCrewHelped(false);
     setTriedChoiceIndices([]);
     setShowGentleHint(false);
+    setPostcardDestId(null);
     setPostcardFlipped(false);
-    setTurnPhase('choose-route');
+    setWarrantFeedback(null);
+    setTurnPhase('town-hub');
     setScreen('expedition');
     playFly(soundOn);
   };
@@ -313,10 +343,7 @@ export function App() {
     playClick(soundOn);
     if (editingPlayer === 'new') {
       const added = createPlayer(data.name, data.avatar, data.defaultLevel);
-      setSavedState((prev) => ({
-        ...prev,
-        players: [...prev.players, added],
-      }));
+      setSavedState((prev) => ({ ...prev, players: [...prev.players, added] }));
     } else if (editingPlayer) {
       setSavedState((prev) => ({
         ...prev,
@@ -350,101 +377,131 @@ export function App() {
     setEditingPlayer(null);
   };
 
-  // Gameplay Turn Handlers
-  const completeLanding = useCallback(
-    (destId: string, level: DifficultyLevel) => {
-      if (flyTimerRef.current) {
-        window.clearTimeout(flyTimerRef.current);
-        flyTimerRef.current = null;
-      }
-      playLandingChime(soundOn);
-      setTurnPhase('question');
-      if (typeof window !== 'undefined') {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-      const targetDest = DESTINATIONS_BY_ID[destId];
-      if (savedState.preferences.readAloudEnabled && targetDest) {
-        const q = targetDest.questions[level];
-        speakText(q.prompt);
-      }
-    },
-    [soundOn, savedState.preferences.readAloudEnabled]
-  );
+  // =========================================================================
+  // GAMEPLAY HANDLERS (TOWN HUB -> SPOT CHALLENGE -> DEPARTURE -> FLIGHT -> FINALE)
+  // =========================================================================
 
-  const handleSelectRoute = (destId: string) => {
-    if (!activeMission || turnPhase !== 'choose-route') return;
+  const handleSelectSpot = (spotId: TownSpotId) => {
+    if (!activeMission || turnPhase !== 'town-hub') return;
     stopSpeaking();
-    playFly(soundOn);
-    const fromId = activeMission.currentDestId;
-    const chosenLevel = activeLevel;
-    setFlyingFromId(fromId);
-    setPendingDestId(destId);
+    playClick(soundOn);
+    const q = selectSpotQuestion({
+      destId: activeMission.currentDestId,
+      level: activeLevel,
+      spotId,
+      seenQuestionIds: savedState.seenQuestionIds,
+    });
+    setActiveSpotId(spotId);
+    setActiveQuestion(q);
+    setLatestWitnessClue(null);
     setCrewHelped(false);
     setTriedChoiceIndices([]);
     setShowGentleHint(false);
-    setPostcardFlipped(false);
-    setTurnPhase('flying');
-
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTurnPhase('spot-challenge');
+    if (savedState.preferences.readAloudEnabled) {
+      speakText(q.prompt);
     }
-
-    if (flyTimerRef.current) window.clearTimeout(flyTimerRef.current);
-    flyTimerRef.current = window.setTimeout(() => {
-      completeLanding(destId, chosenLevel);
-    }, FLIGHT_DURATION_MS);
-  };
-
-  const handleLandEarly = () => {
-    if (turnPhase !== 'flying' || !pendingDestId) return;
-    completeLanding(pendingDestId, activeLevel);
   };
 
   const handleChangeLevel = (level: DifficultyLevel) => {
     playClick(soundOn);
     setActiveLevel(level);
-    // Reset tried answers if switching level mid-question so choices stay fresh
-    setTriedChoiceIndices([]);
-    setShowGentleHint(false);
+    if (turnPhase === 'spot-challenge' && activeMission && activeSpotId) {
+      const q = selectSpotQuestion({
+        destId: activeMission.currentDestId,
+        level,
+        spotId: activeSpotId,
+        seenQuestionIds: savedState.seenQuestionIds,
+      });
+      setActiveQuestion(q);
+      setTriedChoiceIndices([]);
+      setShowGentleHint(false);
+    }
   };
 
   const handlePickAnswer = (choiceIdx: number) => {
-    if (!activeMission || !pendingDestId || turnPhase !== 'question') return;
-    const dest = DESTINATIONS_BY_ID[pendingDestId];
-    if (!dest) return;
-    const q = dest.questions[activeLevel];
+    if (!activeMission || !activeQuestion || !activeSpotId || turnPhase !== 'spot-challenge') {
+      return;
+    }
 
-    if (choiceIdx === q.correctIndex) {
+    if (choiceIdx === activeQuestion.correctIndex) {
       stopSpeaking();
       playDiscoveryFanfare(soundOn);
-      const isNew = !savedState.discoveredDestIds.includes(dest.id);
-      setCelebratingNewDiscovery(isNew);
-      setPostcardFlipped(false);
+
+      const isFinalStop =
+        activeMission.trailProgressIndex >= activeMission.trailDestIds.length - 1;
+      const nextDestId = isFinalStop
+        ? null
+        : activeMission.trailDestIds[activeMission.trailProgressIndex + 1];
+      const nextDest = nextDestId ? DESTINATIONS_BY_ID[nextDestId] ?? null : null;
+      const culprit = SUSPECTS_BY_ID[activeMission.culpritId];
+      const spotsHere = activeMission.investigatedSpotsByCity[activeMission.currentDestId] ?? [];
+      const traitsFound = Object.keys(activeMission.discoveredSuspectTraits).length;
+
+      // Drop a Suspect Trait on the first spot of each city (or any spot on the final city if < 4 traits found)
+      const shouldDropTrait =
+        traitsFound < 4 && (spotsHere.length === 0 || isFinalStop);
+
+      const witnessClue = generateWitnessClue({
+        spotId: activeSpotId,
+        nextDest,
+        culprit,
+        caseKind: activeMission.kind,
+        level: activeLevel,
+        discoveredTraits: activeMission.discoveredSuspectTraits,
+        dropSuspectTrait: shouldDropTrait,
+      });
+
+      const nextHours = activeMission.hoursElapsed + 3;
+      const outOfTime = nextHours >= activeMission.totalHoursBudget;
 
       setSavedState((prev) => {
+        const nextSeen = [...prev.seenQuestionIds, activeQuestion.id].slice(-400);
         const updatedMissions = prev.missions.map((m) => {
           if (m.id !== activeMission.id) return m;
-          const nextVisited = m.visitedDestIds.includes(dest.id)
-            ? m.visitedDestIds
-            : [...m.visitedDestIds, dest.id];
+          const prevSpots = m.investigatedSpotsByCity[m.currentDestId] ?? [];
+          const nextSpots = prevSpots.includes(activeSpotId)
+            ? prevSpots
+            : [...prevSpots, activeSpotId];
+          const nextTraits = { ...m.discoveredSuspectTraits };
+          if (witnessClue.suspectTraitKey && witnessClue.suspectTraitValue) {
+            nextTraits[witnessClue.suspectTraitKey] = witnessClue.suspectTraitValue;
+          }
           return {
             ...m,
-            currentDestId: dest.id,
-            visitedDestIds: nextVisited,
+            hoursElapsed: nextHours,
             crewHelpCount: m.crewHelpCount + (crewHelped ? 1 : 0),
+            investigatedSpotsByCity: {
+              ...m.investigatedSpotsByCity,
+              [m.currentDestId]: nextSpots,
+            },
+            cluesLog: [
+              ...m.cluesLog,
+              {
+                cityId: m.currentDestId,
+                spotId: activeSpotId,
+                spotTitle: witnessClue.spotTitle,
+                witnessName: witnessClue.witnessName,
+                destinationClue: witnessClue.destinationClue,
+                suspectClue: witnessClue.suspectClue,
+              },
+            ],
+            discoveredSuspectTraits: nextTraits,
+            status: outOfTime ? ('escaped' as const) : m.status,
             updatedAt: Date.now(),
           };
         });
         return {
           ...prev,
+          seenQuestionIds: nextSeen,
           missions: updatedMissions,
-          discoveredDestIds: isNew
-            ? [...prev.discoveredDestIds, dest.id]
-            : prev.discoveredDestIds,
         };
       });
 
-      setTurnPhase('postcard');
+      setLatestWitnessClue(witnessClue);
+      setActiveQuestion(null);
+      setActiveSpotId(null);
+      setTurnPhase(outOfTime ? 'case-complete' : 'town-hub');
     } else {
       playGentleNudge(soundOn);
       setTriedChoiceIndices((prev) =>
@@ -454,115 +511,278 @@ export function App() {
     }
   };
 
-  const handleAskCrew = () => {
-    playCrewHuddle(soundOn);
-    setCrewHelped(true);
+  const handleDismissWitnessClue = () => {
+    if (!activeMission) return;
+    playClick(soundOn);
+    setLatestWitnessClue(null);
+
+    // Advance relay turn to the next family member in town!
+    const nextIdx =
+      (activeMission.currentTurnIndex + 1) % activeMission.playerIds.length;
+    const nextPilotId = activeMission.playerIds[nextIdx];
+    const nextPilot =
+      savedState.players.find((p) => p.id === nextPilotId) ?? savedState.players[0];
+
+    setSavedState((prev) => ({
+      ...prev,
+      missions: prev.missions.map((m) =>
+        m.id === activeMission.id
+          ? { ...m, currentTurnIndex: nextIdx, updatedAt: Date.now() }
+          : m
+      ),
+    }));
+    setActiveLevel(nextPilot.defaultLevel);
+  };
+
+  const completeFlightLanding = useCallback(
+    (targetDestId: string, isReturnFlight: boolean) => {
+      if (flyTimerRef.current) {
+        window.clearTimeout(flyTimerRef.current);
+        flyTimerRef.current = null;
+      }
+
+      if (!activeMission) return;
+      const fromId = flyingFromId ?? activeMission.currentDestId;
+      const flightHours = isReturnFlight
+        ? 8
+        : computeFlightHours(fromId, targetDestId);
+      const nextHours = activeMission.hoursElapsed + flightHours;
+      const outOfTime = nextHours >= activeMission.totalHoursBudget;
+
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      if (outOfTime) {
+        playGentleNudge(soundOn);
+        setSavedState((prev) => ({
+          ...prev,
+          missions: prev.missions.map((m) =>
+            m.id === activeMission.id
+              ? {
+                  ...m,
+                  currentDestId: targetDestId,
+                  hoursElapsed: nextHours,
+                  status: 'escaped',
+                  updatedAt: Date.now(),
+                }
+              : m
+          ),
+        }));
+        setTurnPhase('case-complete');
+        return;
+      }
+
+      // Return flight back to last valid trail city
+      if (isReturnFlight) {
+        playLandingChime(soundOn);
+        setSavedState((prev) => ({
+          ...prev,
+          missions: prev.missions.map((m) =>
+            m.id === activeMission.id
+              ? {
+                  ...m,
+                  currentDestId: targetDestId,
+                  isOnColdTrail: false,
+                  visitedDestIds: [...m.visitedDestIds, targetDestId],
+                  hoursElapsed: nextHours,
+                  updatedAt: Date.now(),
+                }
+              : m
+          ),
+        }));
+        setTurnPhase('town-hub');
+        return;
+      }
+
+      // Check if they deduced the TRUE next destination along the trail!
+      const expectedNextId =
+        activeMission.trailDestIds[activeMission.trailProgressIndex + 1];
+      const isCorrectTrail = targetDestId === expectedNextId;
+
+      if (isCorrectTrail) {
+        playDiscoveryFanfare(soundOn);
+        const nextProgress = activeMission.trailProgressIndex + 1;
+        const isFinal = nextProgress >= activeMission.trailDestIds.length - 1;
+        const nextHopTarget = isFinal
+          ? targetDestId
+          : activeMission.trailDestIds[nextProgress + 1];
+        const nextVisited = [...activeMission.visitedDestIds, targetDestId];
+        const nextBoard = isFinal
+          ? []
+          : buildDepartureBoard(targetDestId, nextHopTarget, nextVisited);
+
+        const isNewDiscovery = !savedState.discoveredDestIds.includes(targetDestId);
+        setCelebratingNewDiscovery(isNewDiscovery);
+        setPostcardDestId(targetDestId);
+        setPostcardFlipped(false);
+        setLatestWitnessClue(null);
+
+        const nextTurnIdx =
+          (activeMission.currentTurnIndex + 1) % activeMission.playerIds.length;
+        const nextPilot =
+          savedState.players.find(
+            (p) => p.id === activeMission.playerIds[nextTurnIdx]
+          ) ?? savedState.players[0];
+        setActiveLevel(nextPilot.defaultLevel);
+
+        setSavedState((prev) => ({
+          ...prev,
+          discoveredDestIds: isNewDiscovery
+            ? [...prev.discoveredDestIds, targetDestId]
+            : prev.discoveredDestIds,
+          missions: prev.missions.map((m) =>
+            m.id === activeMission.id
+              ? {
+                  ...m,
+                  currentDestId: targetDestId,
+                  lastValidDestId: targetDestId,
+                  isOnColdTrail: false,
+                  trailProgressIndex: nextProgress,
+                  departureOptions: nextBoard,
+                  visitedDestIds: nextVisited,
+                  currentTurnIndex: nextTurnIdx,
+                  hoursElapsed: nextHours,
+                  updatedAt: Date.now(),
+                }
+              : m
+          ),
+        }));
+        setTurnPhase('postcard');
+      } else {
+        // COLD TRAIL DRAMA!
+        playGentleNudge(soundOn);
+        const isNewDiscovery = !savedState.discoveredDestIds.includes(targetDestId);
+        setSavedState((prev) => ({
+          ...prev,
+          discoveredDestIds: isNewDiscovery
+            ? [...prev.discoveredDestIds, targetDestId]
+            : prev.discoveredDestIds,
+          missions: prev.missions.map((m) =>
+            m.id === activeMission.id
+              ? {
+                  ...m,
+                  currentDestId: targetDestId,
+                  isOnColdTrail: true,
+                  visitedDestIds: [...m.visitedDestIds, targetDestId],
+                  hoursElapsed: nextHours,
+                  wrongFlightsCount: m.wrongFlightsCount + 1,
+                  updatedAt: Date.now(),
+                }
+              : m
+          ),
+        }));
+        setTurnPhase('cold-trail');
+      }
+    },
+    [activeMission, flyingFromId, savedState.discoveredDestIds, savedState.players, soundOn]
+  );
+
+  const launchFlight = (targetDestId: string, isReturnFlight = false) => {
+    if (!activeMission) return;
+    stopSpeaking();
+    playFly(soundOn);
+    const fromId = activeMission.currentDestId;
+    setFlyingFromId(fromId);
+    setFlyingToId(targetDestId);
+    setFlyingIsReturn(isReturnFlight);
+    setLatestWitnessClue(null);
+    setTurnPhase('flying');
+
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    if (flyTimerRef.current) window.clearTimeout(flyTimerRef.current);
+    flyTimerRef.current = window.setTimeout(() => {
+      completeFlightLanding(targetDestId, isReturnFlight);
+    }, FLIGHT_DURATION_MS);
+  };
+
+  const handleLandEarly = () => {
+    if (turnPhase !== 'flying' || !flyingToId) return;
+    completeFlightLanding(flyingToId, flyingIsReturn);
   };
 
   const handleMarkHistoryFlipped = (destId: string) => {
-    setSavedState((prev) => {
-      if (prev.flippedHistoryIds.includes(destId)) return prev;
-      return {
-        ...prev,
-        flippedHistoryIds: [...prev.flippedHistoryIds, destId],
-      };
-    });
+    setSavedState((prev) =>
+      prev.flippedHistoryIds.includes(destId)
+        ? prev
+        : { ...prev, flippedHistoryIds: [...prev.flippedHistoryIds, destId] }
+    );
   };
 
   const handleTogglePostcardFlip = () => {
     playCardFlip(soundOn);
     setPostcardFlipped((prev) => {
       const next = !prev;
-      if (next && pendingDestId) {
-        handleMarkHistoryFlipped(pendingDestId);
+      if (next && postcardDestId) {
+        handleMarkHistoryFlipped(postcardDestId);
       }
       return next;
     });
   };
 
-  const handleAdvanceTurn = () => {
+  const handleSelectWarrantSuspect = (suspectId: string) => {
     if (!activeMission) return;
-    stopSpeaking();
     playClick(soundOn);
+    setWarrantFeedback(null);
+    setSavedState((prev) => ({
+      ...prev,
+      missions: prev.missions.map((m) =>
+        m.id === activeMission.id
+          ? { ...m, selectedWarrantSuspectId: suspectId, updatedAt: Date.now() }
+          : m
+      ),
+    }));
+  };
 
-    const reachedGoal =
-      activeMission.targetStops !== null &&
-      activeMission.visitedDestIds.length >= activeMission.targetStops;
-
-    if (reachedGoal) {
+  const handleSubmitWarrant = () => {
+    if (!activeMission || !activeMission.selectedWarrantSuspectId) return;
+    if (activeMission.selectedWarrantSuspectId === activeMission.culpritId) {
       playDiscoveryFanfare(soundOn);
+      const medal =
+        activeMission.wrongFlightsCount === 0
+          ? 'gold'
+          : activeMission.wrongFlightsCount === 1
+            ? 'silver'
+            : 'bronze';
+      setSavedState((prev) => ({
+        ...prev,
+        solvedCaseCount: prev.solvedCaseCount + 1,
+        missions: prev.missions.map((m) =>
+          m.id === activeMission.id
+            ? { ...m, status: 'won', medal, updatedAt: Date.now() }
+            : m
+        ),
+      }));
+      setWarrantFeedback(null);
+      setTurnPhase('case-complete');
+    } else {
+      playGentleNudge(soundOn);
+      const nextHours = activeMission.hoursElapsed + 6;
+      const outOfTime = nextHours >= activeMission.totalHoursBudget;
       setSavedState((prev) => ({
         ...prev,
         missions: prev.missions.map((m) =>
           m.id === activeMission.id
-            ? { ...m, completed: true, updatedAt: Date.now() }
+            ? {
+                ...m,
+                hoursElapsed: nextHours,
+                status: outOfTime ? 'escaped' : m.status,
+                updatedAt: Date.now(),
+              }
             : m
         ),
       }));
-      setTurnPhase('mission-complete');
-      return;
+      if (outOfTime) {
+        setTurnPhase('case-complete');
+      } else {
+        setWarrantFeedback(
+          'Not quite! That suspect doesn’t match all your collected profile traits (-6 hours). Double-check the traits above or interview another witness in town!'
+        );
+      }
     }
-
-    const nextIndex =
-      (activeMission.currentTurnIndex + 1) % activeMission.playerIds.length;
-    const nextPilotId = activeMission.playerIds[nextIndex];
-    const nextPilot =
-      savedState.players.find((p) => p.id === nextPilotId) ??
-      savedState.players[0];
-
-    setSavedState((prev) => ({
-      ...prev,
-      missions: prev.missions.map((m) =>
-        m.id === activeMission.id
-          ? { ...m, currentTurnIndex: nextIndex, updatedAt: Date.now() }
-          : m
-      ),
-    }));
-
-    setActiveLevel(nextPilot.defaultLevel);
-    setFlyingFromId(null);
-    setPendingDestId(null);
-    setCrewHelped(false);
-    setTriedChoiceIndices([]);
-    setShowGentleHint(false);
-    setPostcardFlipped(false);
-    setTurnPhase('choose-route');
-  };
-
-  const handleContinueEndless = () => {
-    if (!activeMission) return;
-    playFly(soundOn);
-    const nextIndex =
-      (activeMission.currentTurnIndex + 1) % activeMission.playerIds.length;
-    const nextPilotId = activeMission.playerIds[nextIndex];
-    const nextPilot =
-      savedState.players.find((p) => p.id === nextPilotId) ??
-      savedState.players[0];
-
-    setSavedState((prev) => ({
-      ...prev,
-      missions: prev.missions.map((m) =>
-        m.id === activeMission.id
-          ? {
-              ...m,
-              targetStops: null,
-              theme: 'open-atlas',
-              completed: false,
-              currentTurnIndex: nextIndex,
-              updatedAt: Date.now(),
-            }
-          : m
-      ),
-    }));
-
-    setActiveLevel(nextPilot.defaultLevel);
-    setFlyingFromId(null);
-    setPendingDestId(null);
-    setCrewHelped(false);
-    setTriedChoiceIndices([]);
-    setShowGentleHint(false);
-    setPostcardFlipped(false);
-    setTurnPhase('choose-route');
   };
 
   // TV BIG SCREEN MODE
@@ -570,39 +790,79 @@ export function App() {
     return <TvDisplayScreen onExit={() => setIsTvDisplayMode(false)} />;
   }
 
-  // EXPEDITION GAMEPLAY SCREEN
+  // EXPEDITION / MYSTERY CASE SCREEN
   if (screen === 'expedition' && activeMission) {
     return (
       <>
         <ExpeditionScreen
           mission={activeMission}
-          players={missionPlayers}
           currentPlayer={currentPlayer}
           nextPlayer={nextPlayer}
           discoveredDestIds={savedState.discoveredDestIds}
           turnPhase={turnPhase}
-          routeOptions={routeOptions}
+          activeSpotId={activeSpotId}
+          activeQuestion={activeQuestion}
+          latestWitnessClue={latestWitnessClue}
           flyingFromId={flyingFromId}
-          pendingDestId={pendingDestId}
+          flyingToId={flyingToId}
           activeLevel={activeLevel}
           crewHelped={crewHelped}
           triedChoiceIndices={triedChoiceIndices}
           showGentleHint={showGentleHint}
+          postcardDestId={postcardDestId}
           postcardFlipped={postcardFlipped}
           celebratingNewDiscovery={celebratingNewDiscovery}
+          warrantFeedback={warrantFeedback}
           tvConnectedCode={tvConnectedCode}
-          onSelectRoute={handleSelectRoute}
-          onLandEarly={handleLandEarly}
+          onSelectSpot={handleSelectSpot}
           onChangeLevel={handleChangeLevel}
           onPickAnswer={handlePickAnswer}
-          onAskCrew={handleAskCrew}
+          onAskCrew={() => {
+            playCrewHuddle(soundOn);
+            setCrewHelped(true);
+          }}
+          onDismissWitnessClue={handleDismissWitnessClue}
+          onOpenDepartureBoard={() => {
+            playClick(soundOn);
+            setTurnPhase('departure-board');
+          }}
+          onBackToTownHub={() => {
+            playClick(soundOn);
+            setWarrantFeedback(null);
+            setTurnPhase('town-hub');
+          }}
+          onFlyToDestination={(destId) => launchFlight(destId, false)}
+          onLandEarly={handleLandEarly}
+          onFlyBackToLastValid={() => launchFlight(activeMission.lastValidDestId, true)}
           onTogglePostcardFlip={handleTogglePostcardFlip}
-          onAdvanceTurn={handleAdvanceTurn}
-          onContinueEndless={handleContinueEndless}
+          onFinishPostcard={() => {
+            playClick(soundOn);
+            setTurnPhase('town-hub');
+          }}
+          onOpenFinaleWarrant={() => {
+            playClick(soundOn);
+            setWarrantFeedback(null);
+            setTurnPhase('finale-warrant');
+          }}
+          onSelectWarrantSuspect={handleSelectWarrantSuspect}
+          onSubmitWarrant={handleSubmitWarrant}
           onReadAloud={speakText}
+          onOpenFieldGuide={(compareIds) => {
+            playClick(soundOn);
+            setFieldGuideCompareIds(compareIds ?? []);
+            setFieldGuideOpen(true);
+          }}
+          onOpenNotebook={() => {
+            playClick(soundOn);
+            setNotebookOpen(true);
+          }}
           onOpenPassport={() => {
             playClick(soundOn);
             setPassportOpen(true);
+          }}
+          onStartNewCase={() => {
+            playClick(soundOn);
+            setNewMissionOpen(true);
           }}
           onExitHome={() => {
             stopSpeaking();
@@ -610,6 +870,21 @@ export function App() {
             setScreen('home');
           }}
         />
+
+        {fieldGuideOpen && (
+          <FieldGuideModal
+            compareDestIds={fieldGuideCompareIds}
+            onClose={() => setFieldGuideOpen(false)}
+          />
+        )}
+
+        {notebookOpen && (
+          <CaseNotebookModal
+            mission={activeMission}
+            onSelectWarrant={handleSelectWarrantSuspect}
+            onClose={() => setNotebookOpen(false)}
+          />
+        )}
 
         {passportOpen && (
           <PassportView
@@ -624,11 +899,19 @@ export function App() {
             }}
           />
         )}
+
+        {newMissionOpen && (
+          <NewMissionModal
+            players={savedState.players}
+            onCreate={handleCreateMission}
+            onClose={() => setNewMissionOpen(false)}
+          />
+        )}
       </>
     );
   }
 
-  // HOME / FAMILY EXPEDITION HUB
+  // HOME / FAMILY DETECTIVE ATLAS HUB
   const recentDiscovered = savedState.discoveredDestIds
     .slice(-5)
     .reverse()
@@ -647,12 +930,23 @@ export function App() {
             <div>
               <h1 className="brand-title">Wanderbook Atlas</h1>
               <p className="brand-subtitle">
-                Cooperative Family World Expedition • Stories, Animals & Time-Flip Postcards
+                100-Destination Detective Atlas • Town Mysteries, Free Field Guide & Time-Flip Postcards
               </p>
             </div>
           </div>
 
           <div className="topbar-actions">
+            <button
+              type="button"
+              className="btn btn-sage btn-sm"
+              onClick={() => {
+                playClick(soundOn);
+                setFieldGuideCompareIds([]);
+                setFieldGuideOpen(true);
+              }}
+            >
+              <BookOpen size={17} /> Field Guide ({DESTINATIONS.length})
+            </button>
             <button
               type="button"
               className="btn btn-ochre btn-sm"
@@ -661,7 +955,7 @@ export function App() {
                 setPassportOpen(true);
               }}
             >
-              <BookOpen size={17} /> Passport ({savedState.discoveredDestIds.length}/{DESTINATIONS.length})
+              <Award size={17} /> Passport ({savedState.discoveredDestIds.length}/{DESTINATIONS.length})
             </button>
             <button
               type="button"
@@ -671,20 +965,19 @@ export function App() {
                 setSettingsOpen(true);
               }}
             >
-              <Settings size={17} /> Preferences & Save
+              <Settings size={17} /> Preferences
             </button>
           </div>
         </header>
 
         {/* Main 2-Column Storybook Dashboard */}
         <div className="home-grid">
-          {/* LEFT COLUMN: CREW + ACTIVE EXPEDITIONS */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             {/* Crew Roster */}
-            <section className="paper-panel section-card" aria-label="Family Crew Roster">
+            <section className="paper-panel section-card" aria-label="Family Detective Crew">
               <div className="section-header">
                 <h2 className="section-title">
-                  <Users size={22} color="var(--mariner)" /> Your Explorer Crew
+                  <Users size={22} color="var(--mariner)" /> Your Detective Crew
                 </h2>
                 <button
                   type="button"
@@ -708,7 +1001,6 @@ export function App() {
                       playClick(soundOn);
                       setEditingPlayer(p);
                     }}
-                    title={`Edit ${p.name}`}
                   >
                     <AnimalAvatar avatar={p.avatar} size={46} />
                     <div style={{ textAlign: 'left' }}>
@@ -717,26 +1009,28 @@ export function App() {
                         className={`level-pill ${p.defaultLevel}`}
                         style={{ marginTop: 4, fontSize: '0.72rem', padding: '2px 8px' }}
                       >
-                        {p.defaultLevel === 'scout'
-                          ? 'Scout'
+                        {p.defaultLevel === 'explorer'
+                          ? 'Explorer'
                           : p.defaultLevel === 'navigator'
                             ? 'Navigator'
-                            : 'Trailblazer'}
+                            : p.defaultLevel === 'cartographer'
+                              ? 'Cartographer'
+                              : 'Master Scholar'}
                       </span>
                     </div>
                   </button>
                 ))}
               </div>
               <p style={{ fontSize: '0.84rem', color: 'var(--ink-muted)', fontWeight: 600, marginTop: 12 }}>
-                Tap any explorer to rename them, change their animal friend, or pick their default comfort level.
+                Tap any explorer to edit their name, animal companion, or opt-in tier (from Ages 6–8 up to Tough Adult Master Scholar!).
               </p>
             </section>
 
-            {/* Active Missions / Save Slots */}
-            <section className="paper-panel section-card" aria-label="Saved Expeditions">
+            {/* Saved Mystery Cases */}
+            <section className="paper-panel section-card" aria-label="Mystery Case Files">
               <div className="section-header">
                 <h2 className="section-title">
-                  <Compass size={22} color="var(--terracotta)" /> Your Expeditions
+                  <ShieldCheck size={22} color="var(--terracotta)" /> Active Mystery Cases
                 </h2>
                 <button
                   type="button"
@@ -746,7 +1040,7 @@ export function App() {
                     setNewMissionOpen(true);
                   }}
                 >
-                  <Plus size={16} /> New Expedition
+                  <Plus size={16} /> Open New Case
                 </button>
               </div>
 
@@ -764,10 +1058,11 @@ export function App() {
                   }}
                 >
                   <BalloonEmblem size={54} />
-                  <h3 style={{ fontSize: '1.35rem' }}>Ready to Lift Off?</h3>
-                  <p style={{ color: 'var(--ink-soft)', maxWidth: 420, lineHeight: 1.5, fontWeight: 600 }}>
-                    Take turns piloting your shared hot-air balloon around Earth! Pick story routes,
-                    collect postcards & souvenirs, and keep multiple family adventures saved at once.
+                  <h3 style={{ fontSize: '1.38rem' }}>Your First World Mystery Awaits!</h3>
+                  <p style={{ color: 'var(--ink-soft)', maxWidth: 460, lineHeight: 1.5, fontWeight: 600 }}>
+                    Investigate harbors, markets & archives across 100 real destinations, consult
+                    your always-free Atlas Field Guide to deduce where the trail leads next, and
+                    crack the Suspect Warrant before the Travel Clock runs dry!
                   </p>
                   <button
                     type="button"
@@ -777,13 +1072,17 @@ export function App() {
                       setNewMissionOpen(true);
                     }}
                   >
-                    <Play size={19} /> Launch First Expedition
+                    <Play size={19} /> Launch Mystery Case
                   </button>
                 </div>
               ) : (
                 <div className="missions-list">
                   {savedState.missions.map((mission) => {
                     const currentDest = DESTINATIONS_BY_ID[mission.currentDestId];
+                    const clk = formatTravelClock(
+                      mission.hoursElapsed,
+                      mission.totalHoursBudget
+                    );
                     const pilotId =
                       mission.playerIds[
                         mission.currentTurnIndex % mission.playerIds.length
@@ -797,16 +1096,23 @@ export function App() {
                         <div className="mission-slot-meta">
                           <div className="mission-slot-title">
                             <span>{mission.title}</span>
-                            {mission.completed && (
-                              <span className="level-pill scout">Completed!</span>
+                            {mission.status === 'won' && (
+                              <span className="level-pill explorer">
+                                Solved ({mission.medal?.toUpperCase()})
+                              </span>
+                            )}
+                            {mission.status === 'escaped' && (
+                              <span className="level-pill scholar">Escaped</span>
+                            )}
+                            {mission.isOnColdTrail && mission.status === 'active' && (
+                              <span className="level-pill scholar">Cold Trail!</span>
                             )}
                           </div>
                           <div className="mission-slot-sub">
-                            {mission.targetStops
-                              ? `${mission.visitedDestIds.length} / ${mission.targetStops} stops`
-                              : `${mission.visitedDestIds.length} stops • Open Atlas`}{' '}
-                            • Currently in <strong>{currentDest?.country ?? 'Earth'}</strong> • Up next:{' '}
-                            <strong>{pilot?.name}</strong>
+                            City {mission.trailProgressIndex + 1}/{mission.trailDestIds.length} •{' '}
+                            In <strong>{currentDest?.name ?? 'Earth'}</strong> •{' '}
+                            <Clock size={12} style={{ verticalAlign: 'middle' }} />{' '}
+                            {clk.daysRemainingText} • Up next: <strong>{pilot?.name}</strong>
                           </div>
                         </div>
 
@@ -816,13 +1122,12 @@ export function App() {
                             className="btn btn-primary btn-sm"
                             onClick={() => openMission(mission)}
                           >
-                            <Play size={15} /> {mission.completed ? 'View' : 'Fly'}
+                            <Play size={15} /> {mission.status === 'active' ? 'Investigate' : 'View'}
                           </button>
                           <button
                             type="button"
                             className="btn btn-ghost"
                             onClick={() => handleDeleteMission(mission.id)}
-                            title="Delete mission slot"
                             aria-label={`Delete ${mission.title}`}
                           >
                             <Trash2 size={16} />
@@ -836,14 +1141,11 @@ export function App() {
             </section>
           </div>
 
-          {/* RIGHT COLUMN: TV + TABLET MODE & MASTER PASSPORT */}
+          {/* RIGHT COLUMN: TV + PASSPORT */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* TV + Android Tablet Card */}
             <section className="tv-card" aria-label="TV and Tablet Living Room Mode">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div className="stamp-label" style={{ color: '#F6DFB1' }}>
-                  LIVING ROOM MODE
-                </div>
+                <div className="stamp-label" style={{ color: '#F6DFB1' }}>LIVING ROOM MODE</div>
                 {tvConnectedCode && (
                   <span className="tv-status-pill">
                     <span className="status-dot" /> Linked • {tvConnectedCode}
@@ -853,20 +1155,18 @@ export function App() {
 
               <h3>Watch on TV, Pass the Tablet!</h3>
               <p>
-                Link your Android tablet to your Google TV Streamer Jackbox-style: the big map &
-                postcards shine on the TV while kids pass the tablet to choose routes & answers.
+                Link your Android tablet to your Google TV Streamer: the big world atlas, live
+                clues, Travel Clock & 3D postcards shine on TV while everyone passes the tablet!
               </p>
 
               {tvConnectedCode ? (
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={handleDisconnectTv}
-                  >
-                    <Unlink size={16} /> Unlink TV ({tvConnectedCode})
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleDisconnectTv}
+                >
+                  <Unlink size={16} /> Unlink TV ({tvConnectedCode})
+                </button>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <button
@@ -898,7 +1198,7 @@ export function App() {
             <section className="paper-panel section-card" aria-label="Master Family Passport">
               <div className="section-header" style={{ marginBottom: 12 }}>
                 <h2 className="section-title">
-                  <Award size={22} color="var(--ochre)" /> Family Passport
+                  <Compass size={22} color="var(--ochre)" /> Family Atlas Record
                 </h2>
                 <button
                   type="button"
@@ -912,10 +1212,10 @@ export function App() {
                 </button>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '0.92rem', marginBottom: 7 }}>
-                <span>{savedState.discoveredDestIds.length} of {DESTINATIONS.length} Places Stamped</span>
-                <span style={{ color: 'var(--ochre-dark)' }}>
-                  {savedState.flippedHistoryIds.length} Time-Flips
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '0.9rem', marginBottom: 7, flexWrap: 'wrap', gap: 6 }}>
+                <span>{savedState.discoveredDestIds.length} / {DESTINATIONS.length} Places Stamped</span>
+                <span style={{ color: 'var(--sage-dark)' }}>
+                  {savedState.solvedCaseCount} {savedState.solvedCaseCount === 1 ? 'Case' : 'Cases'} Solved
                 </span>
               </div>
               <div className="progress-track">
@@ -928,7 +1228,7 @@ export function App() {
               </div>
 
               {recentDiscovered.length > 0 ? (
-                <div style={{ marginTop: 16 }}>
+                <div style={{ marginTop: 14 }}>
                   <div className="stamp-label" style={{ color: 'var(--ink-muted)', marginBottom: 8 }}>
                     RECENT SOUVENIRS COLLECTED
                   </div>
@@ -939,7 +1239,7 @@ export function App() {
                         title={`${dest.souvenirName} (${dest.country})`}
                         style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
                       >
-                        <SouvenirArt id={dest.souvenirId} size={48} />
+                        <SouvenirArt id={dest.souvenirId} size={46} />
                         <span style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--ink-soft)' }}>
                           {dest.country}
                         </span>
@@ -948,9 +1248,9 @@ export function App() {
                   </div>
                 </div>
               ) : (
-                <p style={{ fontSize: '0.88rem', color: 'var(--ink-soft)', marginTop: 12, lineHeight: 1.45, fontWeight: 600 }}>
-                  Every stop your family visits across any expedition permanently stamps a postcard
-                  and adds a souvenir right here!
+                <p style={{ fontSize: '0.86rem', color: 'var(--ink-soft)', marginTop: 12, lineHeight: 1.45, fontWeight: 600 }}>
+                  Explore 100 real world destinations, solve rotating mystery cases, and collect
+                  every Time-Flip Postcard and Souvenir!
                 </p>
               )}
             </section>
@@ -974,6 +1274,13 @@ export function App() {
           players={savedState.players}
           onCreate={handleCreateMission}
           onClose={() => setNewMissionOpen(false)}
+        />
+      )}
+
+      {fieldGuideOpen && (
+        <FieldGuideModal
+          compareDestIds={fieldGuideCompareIds}
+          onClose={() => setFieldGuideOpen(false)}
         />
       )}
 

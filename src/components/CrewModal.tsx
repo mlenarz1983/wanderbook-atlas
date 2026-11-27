@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Trash2, X } from 'lucide-react';
-import type { AvatarId, DifficultyLevel, Player } from '../types/game';
 import { AVATAR_OPTIONS } from '../data/avatars';
+import type { AvatarId, DifficultyLevel, Player } from '../types/game';
 import { AnimalAvatar } from './art/AnimalAvatar';
 
 interface CrewModalProps {
-  player: Player | null; // null = creating new player
+  player: Player | null;
   canDelete: boolean;
   onSave: (data: { name: string; avatar: AvatarId; defaultLevel: DifficultyLevel }) => void;
   onDelete?: () => void;
@@ -14,19 +14,24 @@ interface CrewModalProps {
 
 const LEVELS: { id: DifficultyLevel; title: string; desc: string }[] = [
   {
-    id: 'scout',
-    title: 'Scout',
-    desc: 'Starter — animals, continents & playful visual clues',
+    id: 'explorer',
+    title: 'Explorer (Ages 6–8)',
+    desc: 'Continents, oceans, wildlife, landmarks, foods & greetings — 4 real choices, no giveaways!',
   },
   {
     id: 'navigator',
-    title: 'Navigator',
-    desc: 'Medium — landmarks, origins, seasons & big world wonders',
+    title: 'Navigator (Ages 8–11)',
+    desc: 'Capitals, currencies, flags, landforms, waterways & real historical milestones.',
   },
   {
-    id: 'trailblazer',
-    title: 'Trailblazer',
-    desc: 'Stretch — rivers, ancient history & explorer challenges',
+    id: 'cartographer',
+    title: 'Cartographer (Teens+)',
+    desc: 'Regional capitals, ISO currencies, vexillology flags, borders & deeper world history.',
+  },
+  {
+    id: 'scholar',
+    title: 'Master Scholar (Tough Adult Mode)',
+    desc: 'Hard geopolitics, neighbor-only distractors, obscure capitals, currencies & ancient history!',
   },
 ];
 
@@ -40,7 +45,7 @@ export function CrewModal({
   const [name, setName] = useState(player?.name ?? '');
   const [avatar, setAvatar] = useState<AvatarId>(player?.avatar ?? 'fox');
   const [defaultLevel, setDefaultLevel] = useState<DifficultyLevel>(
-    player?.defaultLevel ?? 'scout'
+    player?.defaultLevel ?? 'explorer'
   );
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -61,7 +66,7 @@ export function CrewModal({
         aria-modal="true"
         aria-label={player ? 'Edit Crew Member' : 'Add Crew Member'}
       >
-        <div className="section-header" style={{ marginBottom: 18 }}>
+        <div className="section-header" style={{ marginBottom: 16 }}>
           <h2 style={{ fontSize: '1.45rem' }}>
             {player ? 'Edit Explorer Profile' : 'Add Family Explorer'}
           </h2>
@@ -70,7 +75,7 @@ export function CrewModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
             <label
               htmlFor="explorer-name-input"
@@ -96,7 +101,7 @@ export function CrewModal({
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-                gap: 10,
+                gap: 8,
               }}
             >
               {AVATAR_OPTIONS.map((opt) => {
@@ -111,17 +116,17 @@ export function CrewModal({
                       flexDirection: 'column',
                       alignItems: 'center',
                       gap: 5,
-                      padding: '10px 6px',
+                      padding: '8px 6px',
                       borderRadius: 14,
                       background: selected ? 'var(--mariner-soft)' : 'var(--parchment-bright)',
                       border: selected
                         ? '2.5px solid var(--mariner)'
                         : '1.5px solid rgba(43,35,29,0.18)',
                       fontWeight: 800,
-                      fontSize: '0.78rem',
+                      fontSize: '0.76rem',
                     }}
                   >
-                    <AnimalAvatar avatar={opt.id} size={46} />
+                    <AnimalAvatar avatar={opt.id} size={42} />
                     <span>{opt.label}</span>
                   </button>
                 );
@@ -131,12 +136,12 @@ export function CrewModal({
 
           <div>
             <div style={{ fontWeight: 800, marginBottom: 8 }}>
-              Default Opt-In Comfort Level
-              <span style={{ fontWeight: 600, color: 'var(--ink-muted)', marginLeft: 6, fontSize: '0.86rem' }}>
-                (can change on any turn!)
+              Default Opt-In Skill Tier
+              <span style={{ fontWeight: 600, color: 'var(--ink-muted)', marginLeft: 6, fontSize: '0.84rem' }}>
+                (switch anytime on any turn!)
               </span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {LEVELS.map((lvl) => {
                 const active = defaultLevel === lvl.id;
                 return (
@@ -146,23 +151,17 @@ export function CrewModal({
                     onClick={() => setDefaultLevel(lvl.id)}
                     style={{
                       textAlign: 'left',
-                      padding: '11px 14px',
+                      padding: '10px 13px',
                       borderRadius: 14,
                       border: active
                         ? '2.5px solid var(--mariner)'
                         : '1.5px solid rgba(43,35,29,0.18)',
                       background: active ? 'var(--parchment-bright)' : 'rgba(253,249,240,0.6)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 10,
                     }}
                   >
-                    <div>
-                      <span className={`level-pill ${lvl.id}`}>{lvl.title}</span>
-                      <div style={{ fontSize: '0.88rem', color: 'var(--ink-soft)', fontWeight: 600, marginTop: 4 }}>
-                        {lvl.desc}
-                      </div>
+                    <span className={`level-pill ${lvl.id}`}>{lvl.title}</span>
+                    <div style={{ fontSize: '0.84rem', color: 'var(--ink-soft)', fontWeight: 600, marginTop: 4 }}>
+                      {lvl.desc}
                     </div>
                   </button>
                 );

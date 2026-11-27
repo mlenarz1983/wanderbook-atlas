@@ -7,7 +7,7 @@ interface PostcardSceneProps {
 }
 
 export function PostcardScene({ destination, compact = false }: PostcardSceneProps) {
-  const { postcard, animalAvatar } = destination;
+  const { skyTop, skyBottom, sceneType, animalAvatar } = destination;
   const gradId = `sky-${destination.id}`;
   const ink = '#2B231D';
 
@@ -15,7 +15,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
     <div
       className="postcard-art-box"
       style={{
-        background: `linear-gradient(180deg, ${postcard.skyTop} 0%, ${postcard.skyBottom} 100%)`,
+        background: `linear-gradient(180deg, ${skyTop} 0%, ${skyBottom} 100%)`,
       }}
     >
       <svg
@@ -28,17 +28,17 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
       >
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={postcard.skyTop} />
-            <stop offset="100%" stopColor={postcard.skyBottom} />
+            <stop offset="0%" stopColor={skyTop} />
+            <stop offset="100%" stopColor={skyBottom} />
           </linearGradient>
         </defs>
 
         <rect width="320" height="200" fill={`url(#${gradId})`} />
 
         {/* Storybook Sun or Moon */}
-        {postcard.sceneType === 'aurora-pines' ||
-        postcard.sceneType === 'sahara-dunes' ||
-        postcard.sceneType === 'fjord-stars' ? (
+        {sceneType === 'aurora-pines' ||
+        sceneType === 'sahara-dunes' ||
+        sceneType === 'fjord-stars' ? (
           <g>
             <circle cx="264" cy="42" r="16" fill="#FBF1D5" opacity="0.92" />
             <circle cx="48" cy="30" r="2" fill="#FFF" opacity="0.85" />
@@ -66,7 +66,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
         )}
 
         {/* Scene-Specific Landmarks & Biomes */}
-        {postcard.sceneType === 'pyramids-nile' && (
+        {sceneType === 'pyramids-nile' && (
           <g>
             <path d="M0 148 Q160 135 320 148 L320 200 L0 200 Z" fill="#E4BA78" />
             <polygon points="78,154 146,66 212,154" fill="#D59E56" stroke={ink} strokeWidth="2" />
@@ -76,7 +76,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'geyser-viking' && (
+        {sceneType === 'geyser-viking' && (
           <g>
             <polygon points="0,150 68,86 135,150" fill="#7D99A1" stroke={ink} strokeWidth="1.8" />
             <polygon points="48,105 68,86 88,105" fill="#FBF7EE" />
@@ -92,7 +92,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'volcano-bay' && (
+        {sceneType === 'volcano-bay' && (
           <g>
             <polygon points="100,152 190,66 286,152" fill="#7C776B" stroke={ink} strokeWidth="2" />
             <path d="M174 82 L190 66 L206 82 Q190 88 174 82 Z" fill="#5A534B" />
@@ -106,7 +106,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'parthenon' && (
+        {sceneType === 'parthenon' && (
           <g>
             <path d="M0 156 Q160 120 320 156 L320 200 L0 200 Z" fill="#B9A686" stroke={ink} strokeWidth="1.8" />
             {/* Temple */}
@@ -120,7 +120,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'alps-peaks' && (
+        {sceneType === 'alps-peaks' && (
           <g>
             <polygon points="10,164 92,64 176,164" fill="#7D96A3" stroke={ink} strokeWidth="2" />
             <polygon points="62,100 92,64 122,100 105,94 92,106 78,94" fill="#FBF8F0" />
@@ -133,7 +133,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'savanna-acacia' && (
+        {sceneType === 'savanna-acacia' && (
           <g>
             <path d="M0 144 Q160 132 320 146 L320 200 L0 200 Z" fill="#D4A351" />
             <path d="M0 168 Q160 158 320 170 L320 200 L0 200 Z" fill="#BC873A" />
@@ -143,7 +143,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'baobab-island' && (
+        {sceneType === 'baobab-island' && (
           <g>
             <rect x="0" y="152" width="320" height="48" fill="#C78A57" />
             {/* Giant Baobab Trees */}
@@ -159,7 +159,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'sahara-dunes' && (
+        {sceneType === 'sahara-dunes' && (
           <g>
             <path d="M0 132 Q80 96 170 132 T320 124 L320 200 L0 200 Z" fill="#D98B4C" stroke={ink} strokeWidth="1.6" />
             <path d="M0 156 Q110 126 224 162 T320 150 L320 200 L0 200 Z" fill="#E7A766" stroke={ink} strokeWidth="1.6" />
@@ -167,7 +167,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'bamboo-wall' && (
+        {sceneType === 'bamboo-wall' && (
           <g>
             <path d="M0 140 Q90 88 180 128 T320 112 L320 200 L0 200 Z" fill="#6E9470" />
             {/* Winding Great Wall */}
@@ -180,7 +180,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'fuji-pagoda' && (
+        {sceneType === 'fuji-pagoda' && (
           <g>
             {/* Mount Fuji */}
             <polygon points="72,158 176,66 280,158" fill="#5D7D94" stroke={ink} strokeWidth="2" />
@@ -198,7 +198,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'monsoon-palace' && (
+        {sceneType === 'monsoon-palace' && (
           <g>
             <rect x="0" y="156" width="320" height="44" fill="#4D8E9B" />
             {/* Marble Palace / Taj Dome */}
@@ -210,7 +210,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'himalaya-peaks' && (
+        {sceneType === 'himalaya-peaks' && (
           <g>
             <polygon points="0,168 96,62 192,168" fill="#658296" stroke={ink} strokeWidth="2" />
             <polygon points="104,168 206,46 312,168" fill="#516F85" stroke={ink} strokeWidth="2" />
@@ -233,7 +233,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'borneo-canopy' && (
+        {sceneType === 'borneo-canopy' && (
           <g>
             <rect x="0" y="138" width="320" height="62" fill="#3B6E4C" />
             {[40, 105, 175, 245, 295].map((x, i) => (
@@ -245,7 +245,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'coral-reef' && (
+        {sceneType === 'coral-reef' && (
           <g>
             <rect x="0" y="96" width="320" height="104" fill="#3E94A8" />
             <path d="M0 100 Q40 90 80 100 T160 100 T240 100 T320 100" stroke="#FBF7EE" strokeWidth="3" fill="none" opacity="0.6" />
@@ -257,7 +257,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'uluru-outback' && (
+        {sceneType === 'uluru-outback' && (
           <g>
             <rect x="0" y="146" width="320" height="54" fill="#D58A52" />
             {/* Giant Red Uluru Monolith */}
@@ -266,7 +266,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'fjord-stars' && (
+        {sceneType === 'fjord-stars' && (
           <g>
             <polygon points="0,152 0,72 126,152" fill="#466F6B" stroke={ink} strokeWidth="2" />
             <polygon points="320,152 320,66 196,152" fill="#3B625F" stroke={ink} strokeWidth="2" />
@@ -275,7 +275,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'pacific-volcano' && (
+        {sceneType === 'pacific-volcano' && (
           <g>
             <polygon points="94,154 176,74 264,154" fill="#4E7858" stroke={ink} strokeWidth="2" />
             <path d="M164 86 Q176 76 188 86" stroke="#E06238" strokeWidth="5" strokeLinecap="round" fill="none" />
@@ -284,7 +284,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'maya-jungle' && (
+        {sceneType === 'maya-jungle' && (
           <g>
             <rect x="0" y="146" width="320" height="54" fill="#467856" />
             {/* Stepped Pyramid */}
@@ -296,7 +296,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'red-canyon' && (
+        {sceneType === 'red-canyon' && (
           <g>
             <path d="M0 112 L92 112 L114 148 L208 148 L228 106 L320 106 L320 200 L0 200 Z" fill="#C96442" stroke={ink} strokeWidth="2" />
             <path d="M0 132 L102 132 M218 126 L320 126" stroke="#E69E68" strokeWidth="6" />
@@ -304,7 +304,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'aurora-pines' && (
+        {sceneType === 'aurora-pines' && (
           <g>
             {/* Aurora Ribbon */}
             <path d="M0 78 Q90 36 176 74 T320 52" stroke="#7AE5B8" strokeWidth="20" strokeLinecap="round" fill="none" opacity="0.45" />
@@ -319,7 +319,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'amazon-river' && (
+        {sceneType === 'amazon-river' && (
           <g>
             <rect x="0" y="128" width="320" height="72" fill="#467856" />
             <path d="M90 128 Q186 144 128 168 T216 200 L120 200 Q60 172 110 152 Q126 140 62 128 Z" fill="#3F8D9E" />
@@ -329,7 +329,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'andes-citadel' && (
+        {sceneType === 'andes-citadel' && (
           <g>
             <polygon points="154,158 228,58 308,158" fill="#527D5E" stroke={ink} strokeWidth="2" />
             <path d="M0 154 Q96 112 200 154 L200 200 L0 200 Z" fill="#6A9466" stroke={ink} strokeWidth="1.8" />
@@ -340,7 +340,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'tortoise-isle' && (
+        {sceneType === 'tortoise-isle' && (
           <g>
             <rect x="0" y="142" width="320" height="58" fill="#398DA2" />
             <path d="M56 150 Q148 92 246 150 Z" fill="#6F8C58" stroke={ink} strokeWidth="2" />
@@ -348,7 +348,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'patagonia-fossils' && (
+        {sceneType === 'patagonia-fossils' && (
           <g>
             <polygon points="56,156 96,60 132,156" fill="#7D8891" stroke={ink} strokeWidth="2" />
             <polygon points="116,156 152,48 186,156" fill="#6A7782" stroke={ink} strokeWidth="2" />
@@ -358,7 +358,7 @@ export function PostcardScene({ destination, compact = false }: PostcardScenePro
           </g>
         )}
 
-        {postcard.sceneType === 'antarctic-ice' && (
+        {sceneType === 'antarctic-ice' && (
           <g>
             <rect x="0" y="138" width="320" height="62" fill="#3A7891" />
             {/* Icebergs */}

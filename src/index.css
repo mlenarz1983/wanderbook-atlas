@@ -316,7 +316,8 @@ p {
   border: 1.5px solid transparent;
 }
 
-.level-pill.scout {
+.level-pill.scout,
+.level-pill.explorer {
   background: var(--sage-soft);
   color: var(--sage-dark);
   border-color: rgba(70, 120, 86, 0.32);
@@ -328,10 +329,17 @@ p {
   border-color: rgba(31, 90, 99, 0.32);
 }
 
-.level-pill.trailblazer {
+.level-pill.trailblazer,
+.level-pill.cartographer {
   background: var(--ochre-soft);
   color: var(--ochre-dark);
   border-color: rgba(200, 138, 43, 0.38);
+}
+
+.level-pill.scholar {
+  background: var(--terracotta-soft);
+  color: var(--terracotta-dark);
+  border-color: rgba(196, 83, 58, 0.42);
 }
 
 .ink-stamp-circle {
@@ -823,28 +831,28 @@ p {
   letter-spacing: 0.05em;
 }
 
-/* Opt-in Level Segmented Switcher */
+/* Opt-in Level Segmented Switcher (4 Serious Skill Tiers) */
 .level-switcher {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
   background: var(--parchment-deep);
-  padding: 5px;
+  padding: 4px;
   border-radius: 14px;
   border: 1.5px solid rgba(43, 35, 29, 0.16);
 }
 
 .level-tab {
-  padding: 8px 6px;
+  padding: 7px 4px;
   border-radius: 10px;
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-weight: 800;
   color: var(--ink-soft);
   text-align: center;
   transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.level-tab.active.scout {
+.level-tab.active.explorer {
   background: var(--sage);
   color: #fdf9f0;
   box-shadow: 0 2px 5px rgba(50, 90, 63, 0.28);
@@ -856,10 +864,36 @@ p {
   box-shadow: 0 2px 5px rgba(21, 66, 73, 0.28);
 }
 
-.level-tab.active.trailblazer {
+.level-tab.active.cartographer {
   background: var(--ochre);
   color: #fdf9f0;
   box-shadow: 0 2px 5px rgba(155, 103, 24, 0.28);
+}
+
+.level-tab.active.scholar {
+  background: var(--terracotta);
+  color: #fdf9f0;
+  box-shadow: 0 2px 5px rgba(158, 61, 40, 0.32);
+}
+
+.clock-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-stamp);
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: var(--parchment-deep);
+  border: 1.5px solid rgba(43, 35, 29, 0.25);
+  color: var(--ink);
+}
+
+.clock-pill.urgent {
+  background: var(--terracotta);
+  color: #fdf9f0;
+  border-color: var(--terracotta-dark);
 }
 
 /* Answer Option Buttons */

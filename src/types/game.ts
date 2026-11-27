@@ -1,4 +1,4 @@
-export type DifficultyLevel = 'scout' | 'navigator' | 'trailblazer';
+export type DifficultyLevel = 'explorer' | 'navigator' | 'cartographer' | 'scholar';
 
 export type AvatarId =
   | 'fox'
@@ -19,11 +19,9 @@ export type ContinentName =
   | 'Oceania'
   | 'Antarctica';
 
-export type MissionTheme =
-  | 'grand-tour'
-  | 'animal-safari'
-  | 'time-travel'
-  | 'open-atlas';
+export type CaseKind = 'wonder-chase' | 'lost-explorer' | 'wildlife-trail';
+
+export type TownSpotId = 'harbor' | 'market' | 'archive';
 
 export type SceneType =
   | 'geyser-viking'
@@ -86,65 +84,142 @@ export interface Player {
   defaultLevel: DifficultyLevel;
 }
 
-export interface DestinationQuestion {
-  prompt: string;
-  choices: [string, string, string];
-  correctIndex: number;
-  gentleHint: string;
-  crewClue: string;
+export interface HistoricalMilestone {
+  era: string;
+  title: string;
+  fact: string;
 }
 
 export interface Destination {
   id: string;
   name: string;
   country: string;
+  capital: string;
   continent: ContinentName;
-  coords: [number, number]; // [longitude, latitude]
+  subregion: string;
+  coords: [number, number]; // [lon, lat]
   latLabel: string;
-  biome: string;
+  hemisphere: 'Northern' | 'Southern' | 'Equatorial';
+  currency: string;
+  currencyCode: string;
+  languages: string[];
+  flagColors: [string, string, string];
+  flagDescription: string;
+  waterway: string;
+  landform: string;
+  climate: string;
+  borders: string[]; // bordering countries or "Island nation" / "Surrounded by ..."
   animalName: string;
   animalAvatar: AvatarId;
+  famousFood: string;
+  worldWonder: string;
+  greeting: string;
   souvenirName: string;
   souvenirId: SouvenirIconId;
   souvenirCategory: 'wildlife' | 'artifact';
   routeLabel: string;
-  themes: MissionTheme[];
-  postcard: {
-    headline: string;
-    todayFact: string;
-    timeEra: string;
-    historyTitle: string;
-    historyFact: string;
-    skyTop: string;
-    skyBottom: string;
-    accent: string;
-    sceneType: SceneType;
-  };
-  questions: Record<DifficultyLevel, DestinationQuestion>;
-  neighbors: string[];
+  todayFact: string;
+  history: [HistoricalMilestone, HistoricalMilestone];
+  sceneType: SceneType;
+  skyTop: string;
+  skyBottom: string;
+  accent: string;
 }
 
-export interface Mission {
+export interface QuizQuestion {
+  id: string;
+  destId: string;
+  level: DifficultyLevel;
+  category:
+    | 'geography'
+    | 'culture'
+    | 'history'
+    | 'wildlife'
+    | 'currency'
+    | 'capital'
+    | 'flag';
+  prompt: string;
+  choices: [string, string, string, string];
+  correctIndex: number;
+  gentleHint: string;
+  crewClue: string;
+  almanacTip: string;
+}
+
+export interface SuspectProfile {
+  id: string;
+  name: string;
+  title: string;
+  avatar: AvatarId;
+  caseKind: CaseKind;
+  accessory: string;
+  favoriteTreat: string;
+  companion: string;
+  hobby: string;
+  catchphrase: string;
+}
+
+export interface WitnessClue {
+  spotId: TownSpotId;
+  spotTitle: string;
+  witnessName: string;
+  destinationClue: string;
+  suspectClue: string | null;
+  suspectTraitKey?: 'accessory' | 'favoriteTreat' | 'companion' | 'hobby';
+  suspectTraitValue?: string;
+}
+
+export interface TownClueLogEntry {
+  cityId: string;
+  spotId: TownSpotId;
+  spotTitle: string;
+  witnessName: string;
+  destinationClue: string;
+  suspectClue: string | null;
+}
+
+export interface CaseMission {
   id: string;
   title: string;
-  theme: MissionTheme;
-  targetStops: number | null; // null = Open Atlas (Endless)
+  kind: CaseKind;
+  briefing: string;
+  stolenOrTargetItem: string;
+  culpritId: string;
+  suspectIds: string[]; // 4 suspects in the dossier
+  trailDestIds: string[]; // Ordered true path (length 4-7)
+  trailProgressIndex: number; // Furthest valid trail stop reached (0 .. trailDestIds.length - 1)
+  currentDestId: string; // Can be off-trail if on a Cold Trail!
+  isOnColdTrail: boolean;
+  lastValidDestId: string;
+  departureOptions: string[]; // 5 plausible candidate destinations from current valid stop
+  visitedDestIds: string[]; // Full ordered flight log
+  investigatedSpotsByCity: Record<string, TownSpotId[]>;
+  cluesLog: TownClueLogEntry[];
+  discoveredSuspectTraits: Partial<
+    Record<'accessory' | 'favoriteTreat' | 'companion' | 'hobby', string>
+  >;
+  selectedWarrantSuspectId: string | null;
   playerIds: string[];
   currentTurnIndex: number;
-  currentDestId: string;
-  visitedDestIds: string[];
+  totalHoursBudget: number;
+  hoursElapsed: number;
+  wrongFlightsCount: number;
   crewHelpCount: number;
+  status: 'active' | 'won' | 'escaped';
+  medal?: 'gold' | 'silver' | 'bronze';
   createdAt: number;
   updatedAt: number;
-  completed: boolean;
 }
 
 export type TurnPhase =
-  | 'choose-route'
+  | 'town-hub'
+  | 'spot-challenge'
+  | 'departure-board'
   | 'flying'
-  | 'question'
+  | 'cold-trail'
   | 'postcard'
-  | 'mission-complete';
+  | 'finale-warrant'
+  | 'case-complete';
 
 export interface AppPreferences {
   soundEnabled: boolean;
@@ -154,27 +229,32 @@ export interface AppPreferences {
 export interface SavedAtlasState {
   version: number;
   players: Player[];
-  missions: Mission[];
+  missions: CaseMission[];
   activeMissionId: string | null;
   discoveredDestIds: string[];
   flippedHistoryIds: string[];
+  solvedCaseCount: number;
+  seenQuestionIds: string[];
   preferences: AppPreferences;
 }
 
 export interface LiveSessionState {
   screen: 'home' | 'expedition' | 'passport';
-  activeMission: Mission | null;
+  activeMission: CaseMission | null;
   players: Player[];
   discoveredDestIds: string[];
   flippedHistoryIds: string[];
   turnPhase: TurnPhase;
-  routeOptions: string[];
+  activeSpotId: TownSpotId | null;
+  activeQuestion: QuizQuestion | null;
+  latestWitnessClue: WitnessClue | null;
   flyingFromId: string | null;
-  pendingDestId: string | null;
+  flyingToId: string | null;
   activeLevel: DifficultyLevel;
   crewHelped: boolean;
   triedChoiceIndices: number[];
   showGentleHint: boolean;
+  postcardDestId: string | null;
   postcardFlipped: boolean;
   celebratingNewDiscovery: boolean;
   passportHighlightId: string | null;

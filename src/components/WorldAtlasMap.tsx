@@ -458,13 +458,13 @@ export function WorldAtlasMap({
                       ? 9.5
                       : isRouteOption
                         ? isHovered
-                          ? 10
+                          ? 10.5
                           : 8.5
                         : isCurrent || isFlightOrigin
                           ? 7.5
                           : isDiscovered
-                            ? 6
-                            : 4.2
+                            ? 4.4
+                            : 2.6
                   }
                   fill={
                     isRouteOption || isFlightTarget
@@ -476,12 +476,13 @@ export function WorldAtlasMap({
                           : '#FBF5E8'
                   }
                   stroke="#2B231D"
-                  strokeWidth={isRouteOption || isCurrent || isFlightTarget ? '2.1' : '1.4'}
+                  strokeWidth={isRouteOption || isCurrent || isFlightTarget ? '2.1' : '1.0'}
+                  opacity={isRouteOption || isCurrent || isFlightTarget || isDiscovered ? 1 : 0.72}
                 />
 
                 {/* Inner Star/Dot */}
-                {(isRouteOption || isFlightTarget || isDiscovered) && (
-                  <circle r={isRouteOption || isFlightTarget ? 3 : 2.1} fill="#FBF5E8" />
+                {(isRouteOption || isFlightTarget) && (
+                  <circle r={3} fill="#FBF5E8" />
                 )}
 
                 {/* Crisp Label Pill for Route Options, Active, or Flight Endpoints */}

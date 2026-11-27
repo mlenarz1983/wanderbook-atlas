@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Award, BookOpen, Clock, Lock, X } from 'lucide-react';
+import { Award, BookOpen, Clock, Lock, Search, X } from 'lucide-react';
 import { CONTINENT_ORDER, DESTINATIONS, DESTINATIONS_BY_ID } from '../data/destinations';
 import type { ContinentName } from '../types/game';
 import { PostcardScene } from './art/PostcardScene';
@@ -25,16 +25,21 @@ export function PassportView({
 }: PassportViewProps) {
   const [tab, setTab] = useState<'postcards' | 'souvenirs'>('postcards');
   const [selectedContinent, setSelectedContinent] = useState<'All' | ContinentName>('All');
+  const [search, setSearch] = useState('');
   const [inspectId, setInspectId] = useState<string | null>(null);
   const [inspectFlipped, setInspectFlipped] = useState(false);
 
   const discoveredSet = new Set(discoveredDestIds);
   const flippedSet = new Set(flippedHistoryIds);
 
-  const filteredDestinations =
-    selectedContinent === 'All'
-      ? DESTINATIONS
-      : DESTINATIONS.filter((d) => d.continent === selectedContinent);
+  const q = search.trim().toLowerCase();
+  const filteredDestinations = DESTINATIONS.filter((d) => {
+    if (selectedContinent !== 'All' && d.continent !== selectedContinent) return false;
+    if (!q) return true;
+    return `${d.name} ${d.country} ${d.subregion} ${d.souvenirName}`
+      .toLowerCase()
+      .includes(q);
+  }).sort((a, b) => Number(discoveredSet.has(b.id)) - Number(discoveredSet.has(a.id)));
 
   const inspectDest = inspectId ? DESTINATIONS_BY_ID[inspectId] : null;
 
@@ -62,7 +67,7 @@ export function PassportView({
         <div className="section-header" style={{ marginBottom: 14 }}>
           <div>
             <div className="stamp-label" style={{ color: 'var(--terracotta)' }}>
-              MASTER FAMILY COLLECTION
+              MASTER FAMILY COLLECTION • {DESTINATIONS.length} WORLD STOPS
             </div>
             <h2 style={{ fontSize: '1.6rem', marginTop: 2 }}>
               Wanderbook Passport & Souvenirs
@@ -81,7 +86,7 @@ export function PassportView({
             justifyContent: 'space-between',
             gap: 14,
             flexWrap: 'wrap',
-            marginBottom: 18,
+            marginBottom: 14,
             padding: '12px 16px',
             borderRadius: 16,
             background: 'var(--parchment-deep)',
@@ -121,29 +126,46 @@ export function PassportView({
           </div>
         </div>
 
-        {/* Continent Filter */}
-        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 16 }}>
-          {(['All', ...CONTINENT_ORDER] as const).map((cont) => {
-            const active = selectedContinent === cont;
-            return (
-              <button
-                key={cont}
-                type="button"
-                onClick={() => setSelectedContinent(cont)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  fontSize: '0.82rem',
-                  fontWeight: 800,
-                  background: active ? 'var(--mariner)' : 'var(--parchment-bright)',
-                  color: active ? '#FDF9F0' : 'var(--ink-soft)',
-                  border: active ? '1.5px solid var(--mariner-dark)' : '1.5px solid rgba(43,35,29,0.18)',
-                }}
-              >
-                {cont}
-              </button>
-            );
-          })}
+        {/* Search + Continent Filter */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ position: 'relative', flex: '1 1 210px' }}>
+            <Search
+              size={16}
+              color="var(--ink-muted)"
+              style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)' }}
+            />
+            <input
+              className="input-field"
+              type="search"
+              placeholder="Filter 100 destinations..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ padding: '8px 12px 8px 34px', fontSize: '0.9rem' }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(['All', ...CONTINENT_ORDER] as const).map((cont) => {
+              const active = selectedContinent === cont;
+              return (
+                <button
+                  key={cont}
+                  type="button"
+                  onClick={() => setSelectedContinent(cont)}
+                  style={{
+                    padding: '6px 11px',
+                    borderRadius: 999,
+                    fontSize: '0.8rem',
+                    fontWeight: 800,
+                    background: active ? 'var(--mariner)' : 'var(--parchment-bright)',
+                    color: active ? '#FDF9F0' : 'var(--ink-soft)',
+                    border: active ? '1.5px solid var(--mariner-dark)' : '1.5px solid rgba(43,35,29,0.18)',
+                  }}
+                >
+                  {cont}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Tab 1: Postcards */}
