@@ -1,34 +1,15 @@
 import { useMemo, useState } from 'react';
 import { BookOpen, Compass, Search, X } from 'lucide-react';
 import { CONTINENT_ORDER, DESTINATIONS } from '../data/destinations';
+import { getUsStateMeta } from '../data/destinations/usStatesMeta';
 import type { ContinentName, Destination } from '../types/game';
+import { MiniFlag } from './art/MiniFlag';
 
 interface FieldGuideModalProps {
   /** Optional 5 Departure Board IDs so players can compare candidate stops side-by-side! */
   compareDestIds?: string[];
   initialSearch?: string;
   onClose: () => void;
-}
-
-function FlagSwatch({ colors }: { colors: [string, string, string] }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: 'inline-flex',
-        width: 32,
-        height: 20,
-        borderRadius: 4,
-        overflow: 'hidden',
-        border: '1.5px solid rgba(43,35,29,0.45)',
-        flexShrink: 0,
-      }}
-    >
-      <span style={{ flex: 1, background: colors[0] }} />
-      <span style={{ flex: 1, background: colors[1] }} />
-      <span style={{ flex: 1, background: colors[2] }} />
-    </span>
-  );
 }
 
 export function FieldGuideModal({
@@ -50,6 +31,7 @@ export function FieldGuideModal({
       if (compareOnly && hasCompare && !compareSet.has(d.id)) return false;
       if (!compareOnly && continent !== 'All' && d.continent !== continent) return false;
       if (!q) return true;
+      const us = getUsStateMeta(d.id);
       const haystack = [
         d.name,
         d.country,
@@ -68,6 +50,9 @@ export function FieldGuideModal({
         d.famousFood,
         d.worldWonder,
         d.greeting,
+        us?.stateName ?? '',
+        us?.nickname ?? '',
+        us?.stateCapital ?? '',
         d.history[0].era,
         d.history[0].title,
         d.history[0].fact,
@@ -218,8 +203,13 @@ export function FieldGuideModal({
                       <h3 style={{ fontSize: '1.15rem', marginTop: 2 }}>
                         {dest.country} — {dest.name}
                       </h3>
+                      {getUsStateMeta(dest.id) && (
+                        <div style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--terracotta)' }}>
+                          {getUsStateMeta(dest.id)?.nickname}
+                        </div>
+                      )}
                     </div>
-                    <FlagSwatch colors={dest.flagColors} />
+                    <MiniFlag dest={dest} width={34} />
                   </div>
 
                   {/* Quick Fact Table */}

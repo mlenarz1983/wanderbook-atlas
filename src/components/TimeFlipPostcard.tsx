@@ -1,5 +1,6 @@
-import { Clock, RotateCcw, Sparkles, Volume2 } from 'lucide-react';
+import { Clock, RotateCcw, Sparkles } from 'lucide-react';
 import type { Destination } from '../types/game';
+import { MiniFlag } from './art/MiniFlag';
 import { PostcardScene } from './art/PostcardScene';
 import { SouvenirArt } from './art/SouvenirArt';
 
@@ -7,7 +8,6 @@ interface TimeFlipPostcardProps {
   destination: Destination;
   flipped: boolean;
   onToggleFlip: () => void;
-  onReadAloud?: (text: string) => void;
   isNewDiscovery?: boolean;
   large?: boolean;
 }
@@ -16,7 +16,6 @@ export function TimeFlipPostcard({
   destination,
   flipped,
   onToggleFlip,
-  onReadAloud,
   isNewDiscovery = false,
   large = false,
 }: TimeFlipPostcardProps) {
@@ -32,7 +31,7 @@ export function TimeFlipPostcard({
               <div
                 style={{
                   display: 'flex',
-                  alignItems: 'flex-start',
+                  alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: 10,
                   marginBottom: 10,
@@ -42,25 +41,19 @@ export function TimeFlipPostcard({
                   <div className="stamp-label" style={{ color: 'var(--terracotta)' }}>
                     {isNewDiscovery ? '★ NEW PASSPORT STAMP' : 'AIRMAIL POSTCARD'} • {destination.subregion}
                   </div>
-                  <h3 style={{ fontSize: large ? '1.65rem' : '1.26rem', marginTop: 2 }}>
-                    {destination.name}
+                  <h3
+                    style={{
+                      fontSize: large ? '1.65rem' : '1.26rem',
+                      marginTop: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 9,
+                    }}
+                  >
+                    <MiniFlag dest={destination} width={large ? 36 : 30} />
+                    <span>{destination.name}</span>
                   </h3>
                 </div>
-                {onReadAloud && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() =>
-                      onReadAloud(
-                        `${destination.name}, ${destination.country}. ${destination.worldWonder}. ${destination.todayFact}`
-                      )
-                    }
-                    title="Read postcard aloud"
-                    aria-label="Read postcard aloud"
-                  >
-                    <Volume2 size={16} />
-                  </button>
-                )}
               </div>
 
               <PostcardScene destination={destination} />
@@ -207,31 +200,7 @@ export function TimeFlipPostcard({
                 </div>
               </div>
 
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 10,
-                  flexWrap: 'wrap',
-                }}
-              >
-                {onReadAloud ? (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() =>
-                      onReadAloud(
-                        `${m0.era}. ${m0.title}. ${m0.fact} Also, ${m1.era}: ${m1.title}. ${m1.fact}`
-                      )
-                    }
-                  >
-                    <Volume2 size={16} /> Read Stories Aloud
-                  </button>
-                ) : (
-                  <span />
-                )}
-
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"

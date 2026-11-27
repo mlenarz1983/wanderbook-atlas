@@ -1,5 +1,19 @@
 export type DifficultyLevel = 'explorer' | 'navigator' | 'cartographer' | 'scholar';
 
+export type MissionDifficulty = 'usa' | 'iconic-world' | 'full-world' | 'time-warp';
+
+export type HistoricalEra = 'ancient' | 'sail' | 'modern';
+
+export type ClueIconKind =
+  | 'flag'
+  | 'currency'
+  | 'geography'
+  | 'landmark'
+  | 'food'
+  | 'wildlife'
+  | 'era'
+  | 'suspect';
+
 export type AvatarId =
   | 'fox'
   | 'otter'
@@ -19,7 +33,7 @@ export type ContinentName =
   | 'Oceania'
   | 'Antarctica';
 
-export type CaseKind = 'wonder-chase' | 'lost-explorer' | 'wildlife-trail';
+export type CaseKind = 'wonder-chase';
 
 export type SpotRole = 'harbor' | 'market' | 'archive' | 'landmark' | 'nature';
 
@@ -195,7 +209,9 @@ export interface WitnessClue {
   spotId: string;
   spotTitle: string;
   witnessName: string;
+  icon: ClueIconKind;
   destinationClue: string;
+  eraClue?: string | null;
   suspectClue: string | null;
   suspectTraitKey?: 'accessory' | 'favoriteTreat' | 'companion' | 'hobby';
   suspectTraitValue?: string;
@@ -206,7 +222,9 @@ export interface TownClueLogEntry {
   spotId: string;
   spotTitle: string;
   witnessName: string;
+  icon?: ClueIconKind;
   destinationClue: string;
+  eraClue?: string | null;
   suspectClue: string | null;
 }
 
@@ -214,14 +232,18 @@ export interface CaseMission {
   id: string;
   title: string;
   kind: CaseKind;
+  missionDifficulty: MissionDifficulty;
   briefing: string;
   stolenOrTargetItem: string;
   culpritId: string;
   suspectIds: string[];
   trailDestIds: string[];
+  trailEras?: HistoricalEra[]; // Used in Level 4 Time-Warp Chase
   trailProgressIndex: number;
   currentDestId: string;
+  currentEra?: HistoricalEra;
   isOnColdTrail: boolean;
+  isOnWrongEra?: boolean;
   lastValidDestId: string;
   departureOptions: string[];
   visitedDestIds: string[];
@@ -249,14 +271,10 @@ export type TurnPhase =
   | 'departure-board'
   | 'flying'
   | 'cold-trail'
+  | 'time-slip'
   | 'postcard'
   | 'finale-warrant'
   | 'case-complete';
-
-export interface AppPreferences {
-  soundEnabled: boolean;
-  readAloudEnabled: boolean;
-}
 
 export interface SavedAtlasState {
   version: number;
@@ -267,7 +285,6 @@ export interface SavedAtlasState {
   flippedHistoryIds: string[];
   solvedCaseCount: number;
   seenQuestionIds: string[];
-  preferences: AppPreferences;
 }
 
 export interface LiveSessionState {
@@ -280,6 +297,8 @@ export interface LiveSessionState {
   activeSpotId: string | null;
   lastVisitedSpotId: string | null;
   activeQuestion: QuizQuestion | null;
+  selectedChoiceIndex: number | null;
+  selectedEra: HistoricalEra | null;
   latestWitnessClue: WitnessClue | null;
   flyingFromId: string | null;
   flyingToId: string | null;

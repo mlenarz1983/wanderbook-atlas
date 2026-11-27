@@ -1,14 +1,15 @@
 import {
-  CASE_TEMPLATES,
+  generateCaseEras,
   generateCaseTrail,
+  pickCaseTemplate,
   pickSuspectPool,
 } from '../data/cases';
 import { buildDepartureBoard } from '../data/destinations';
 import type {
   AvatarId,
-  CaseKind,
   CaseMission,
   DifficultyLevel,
+  MissionDifficulty,
   Player,
   SavedAtlasState,
 } from '../types/game';
@@ -40,9 +41,24 @@ function migrateLevel(raw: string | undefined): DifficultyLevel {
   return 'explorer';
 }
 
+function migrateMission(raw: Partial<CaseMission>): CaseMission {
+  const diff: MissionDifficulty =
+    raw.missionDifficulty === 'usa' ||
+    raw.missionDifficulty === 'iconic-world' ||
+    raw.missionDifficulty === 'full-world' ||
+    raw.missionDifficulty === 'time-warp'
+      ? raw.missionDifficulty
+      : 'full-world';
+  return {
+    ...(raw as CaseMission),
+    kind: 'wonder-chase',
+    missionDifficulty: diff,
+  };
+}
+
 export function createInitialState(): SavedAtlasState {
   return {
-    version: 2,
+    version: 3,
     players: DEFAULT_PLAYERS,
     missions: [],
     activeMissionId: null,
@@ -50,10 +66,6 @@ export function createInitialState(): SavedAtlasState {
     flippedHistoryIds: [],
     solvedCaseCount: 0,
     seenQuestionIds: [],
-    preferences: {
-      soundEnabled: true,
-      readAloudEnabled: false,
-    },
   };
 }
 
@@ -71,9 +83,11 @@ export function loadSavedState(): SavedAtlasState {
             }))
           : DEFAULT_PLAYERS;
       return {
-        version: 2,
+        version: 3,
         players,
-        missions: Array.isArray(parsed.missions) ? parsed.missions : [],
+        missions: Array.isArray(parsed.missions)
+          ? parsed.missions.map((m) => migrateMission(m))
+          : [],
         activeMissionId: parsed.activeMissionId ?? null,
         discoveredDestIds: Array.isArray(parsed.discoveredDestIds)
           ? parsed.discoveredDestIds
@@ -86,21 +100,15 @@ export function loadSavedState(): SavedAtlasState {
         seenQuestionIds: Array.isArray(parsed.seenQuestionIds)
           ? parsed.seenQuestionIds.slice(-400)
           : [],
-        preferences: {
-          soundEnabled: parsed.preferences?.soundEnabled ?? true,
-          readAloudEnabled: parsed.preferences?.readAloudEnabled ?? false,
-        },
       };
     }
 
-    // Smooth migration from v1 save: keep family players & discovered postcards!
     const rawV1 = window.localStorage.getItem(LEGACY_V1_KEY);
     if (rawV1) {
       const legacy = JSON.parse(rawV1) as {
         players?: Array<{ id: string; name: string; avatar: AvatarId; defaultLevel?: string }>;
         discoveredDestIds?: string[];
         flippedHistoryIds?: string[];
-        preferences?: { soundEnabled?: boolean; readAloudEnabled?: boolean };
       };
       const players =
         Array.isArray(legacy.players) && legacy.players.length > 0
@@ -120,10 +128,6 @@ export function loadSavedState(): SavedAtlasState {
         flippedHistoryIds: Array.isArray(legacy.flippedHistoryIds)
           ? legacy.flippedHistoryIds
           : [],
-        preferences: {
-          soundEnabled: legacy.preferences?.soundEnabled ?? true,
-          readAloudEnabled: legacy.preferences?.readAloudEnabled ?? false,
-        },
       };
     }
 
@@ -144,46 +148,60 @@ export function persistState(state: SavedAtlasState) {
 
 export function createCaseMission(params: {
   title?: string;
-  kind: CaseKind | 'random';
+  missionDifficulty: MissionDifficulty;
   stopsCount: number; // 4, 5, or 7
   playerIds: string[];
 }): CaseMission {
   const now = Date.now();
-  const chosenKind: CaseKind =
-    params.kind === 'random'
-      ? (['wonder-chase', 'lost-explorer', 'wildlife-trail'] as CaseKind[])[
-          Math.floor(Math.random() * 3)
-        ]
-      : params.kind;
+  const { missionDifficulty, stopsCount } = params;
+  const template = pickCaseTemplate(missionDifficulty);
 
-  const matchingTemplates = CASE_TEMPLATES.filter((t) => t.kind === chosenKind);
-  const template =
-    matchingTemplates[Math.floor(Math.random() * matchingTemplates.length)] ??
-    CASE_TEMPLATES[0];
+  const trail = generateCaseTrail(
+    missionDifficulty,
+    template.preferredStartIds,
+    stopsCount
+  );
+  const trailEras =
+    missionDifficulty === 'time-warp' ? generateCaseEras(trail.length) : undefined;
 
-  const trail = generateCaseTrail(template.preferredStartIds, params.stopsCount);
-  const { culpritId, suspectIds } = pickSuspectPool(chosenKind);
+  const { culpritId, suspectIds } = pickSuspectPool();
   const startId = trail[0];
   const nextId = trail[1] ?? trail[0];
 
-  // Generous yet genuinely tense Travel Clock:
-  // ~2.4 days (58 hours) per leg gives room for 2-3 town investigations + 1 wrong turn recovery!
-  const totalHoursBudget = Math.max(192, (params.stopsCount - 1) * 60 + 48);
+  // Clock tightens progressively from Level 1 (generous USA tour) -> Level 4 (Time-Warp!)
+  const hoursPerLeg =
+    missionDifficulty === 'usa'
+      ? 68
+      : missionDifficulty === 'iconic-world'
+        ? 60
+        : missionDifficulty === 'full-world'
+          ? 52
+          : 50;
+  const totalHoursBudget = Math.max(168, (stopsCount - 1) * hoursPerLeg + 48);
 
   return {
     id: `case-${now}-${Math.random().toString(36).slice(2, 6)}`,
     title: params.title?.trim() || template.title,
-    kind: chosenKind,
+    kind: 'wonder-chase',
+    missionDifficulty,
     briefing: template.briefing,
     stolenOrTargetItem: template.stolenOrTargetItem,
     culpritId,
     suspectIds,
     trailDestIds: trail,
+    trailEras,
     trailProgressIndex: 0,
     currentDestId: startId,
+    currentEra: trailEras?.[0],
     isOnColdTrail: false,
+    isOnWrongEra: false,
     lastValidDestId: startId,
-    departureOptions: buildDepartureBoard(startId, nextId, [startId]),
+    departureOptions: buildDepartureBoard(
+      startId,
+      nextId,
+      [startId],
+      missionDifficulty
+    ),
     visitedDestIds: [startId],
     investigatedSpotsByCity: {},
     cluesLog: [],
@@ -220,12 +238,14 @@ export function validateImportedState(jsonText: string): SavedAtlasState | null 
     if (!parsed || typeof parsed !== 'object') return null;
     if (!Array.isArray(parsed.players) || parsed.players.length === 0) return null;
     return {
-      version: 2,
+      version: 3,
       players: parsed.players.map((p) => ({
         ...p,
         defaultLevel: migrateLevel(p.defaultLevel),
       })),
-      missions: Array.isArray(parsed.missions) ? parsed.missions : [],
+      missions: Array.isArray(parsed.missions)
+        ? parsed.missions.map((m) => migrateMission(m))
+        : [],
       activeMissionId: parsed.activeMissionId ?? null,
       discoveredDestIds: Array.isArray(parsed.discoveredDestIds)
         ? parsed.discoveredDestIds
@@ -238,10 +258,6 @@ export function validateImportedState(jsonText: string): SavedAtlasState | null 
       seenQuestionIds: Array.isArray(parsed.seenQuestionIds)
         ? parsed.seenQuestionIds.slice(-400)
         : [],
-      preferences: {
-        soundEnabled: parsed.preferences?.soundEnabled ?? true,
-        readAloudEnabled: parsed.preferences?.readAloudEnabled ?? false,
-      },
     };
   } catch {
     return null;

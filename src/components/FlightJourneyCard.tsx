@@ -4,6 +4,7 @@ import { computeDistanceMiles } from '../data/destinations';
 import type { AvatarId, Destination } from '../types/game';
 import { AnimalAvatar } from './art/AnimalAvatar';
 import { BalloonEmblem } from './art/CompassRose';
+import { MiniFlag } from './art/MiniFlag';
 
 interface FlightJourneyCardProps {
   fromDest: Destination;
@@ -163,17 +164,21 @@ export function FlightJourneyCard({
           style={{
             display: 'flex',
             justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 8,
             fontSize: '0.78rem',
             fontWeight: 800,
             color: 'var(--ink-soft)',
             marginBottom: 8,
           }}
         >
-          <span>
-            {fromDest.name}, {fromDest.country}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <MiniFlag dest={fromDest} width={24} />
+            <span>{fromDest.name}</span>
           </span>
-          <span>
-            {toDest.name}, {toDest.country}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span>{toDest.name}</span>
+            <MiniFlag dest={toDest} width={24} />
           </span>
         </div>
 

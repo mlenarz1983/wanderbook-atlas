@@ -10,7 +10,6 @@ interface PassportViewProps {
   discoveredDestIds: string[];
   flippedHistoryIds: string[];
   onFlipHistory: (destId: string) => void;
-  onReadAloud: (text: string) => void;
   onHighlightDest?: (destId: string | null) => void;
   onClose: () => void;
 }
@@ -19,7 +18,6 @@ export function PassportView({
   discoveredDestIds,
   flippedHistoryIds,
   onFlipHistory,
-  onReadAloud,
   onHighlightDest,
   onClose,
 }: PassportViewProps) {
@@ -326,7 +324,6 @@ export function PassportView({
                   return next;
                 });
               }}
-              onReadAloud={onReadAloud}
             />
             <button type="button" className="btn btn-secondary" onClick={closeInspect}>
               Back to Passport

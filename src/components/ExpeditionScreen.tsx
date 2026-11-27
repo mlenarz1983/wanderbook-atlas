@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Award,
   BookOpen,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -11,6 +12,7 @@ import {
   Compass,
   ExternalLink,
   FileText,
+  Hourglass,
   Landmark,
   Map as MapIcon,
   MapPin,
@@ -21,7 +23,6 @@ import {
   Trees,
   Tv,
   Users,
-  Volume2,
 } from 'lucide-react';
 import { SUSPECTS_BY_ID } from '../data/cases';
 import {
@@ -29,13 +30,20 @@ import {
   DESTINATIONS_BY_ID,
   computeDistanceMiles,
   computeFlightHours,
+  formatDestinationShortLabel,
 } from '../data/destinations';
+import {
+  ERA_INFO,
+  MISSION_DIFFICULTY_INFO,
+  getUsStateMeta,
+} from '../data/destinations/usStatesMeta';
 import { getCityLayout } from '../data/landmarks';
 import type {
   AvatarId,
   CaseMission,
   CityLandmark,
   DifficultyLevel,
+  HistoricalEra,
   Player,
   QuizQuestion,
   SpotRole,
@@ -44,6 +52,8 @@ import type {
 } from '../types/game';
 import { formatTravelClock } from '../utils/storage';
 import { AnimalAvatar } from './art/AnimalAvatar';
+import { ClueGlyph } from './art/ClueGlyph';
+import { MiniFlag } from './art/MiniFlag';
 import { SouvenirArt } from './art/SouvenirArt';
 import { CityOrientationMap } from './CityOrientationMap';
 import { CulpritBadge } from './CulpritBadge';
@@ -61,6 +71,8 @@ interface ExpeditionScreenProps {
   activeSpotId: string | null;
   lastVisitedSpotId: string | null;
   activeQuestion: QuizQuestion | null;
+  selectedChoiceIndex: number | null;
+  selectedEra: HistoricalEra;
   latestWitnessClue: WitnessClue | null;
   flyingFromId: string | null;
   flyingToId: string | null;
@@ -76,7 +88,10 @@ interface ExpeditionScreenProps {
   tvConnectedCode: string | null;
   onSelectSpot: (spot: CityLandmark) => void;
   onChangeLevel: (level: DifficultyLevel) => void;
-  onPickAnswer: (index: number) => void;
+  onSelectChoice: (index: number) => void;
+  onConfirmAnswer: () => void;
+  onSelectEra: (era: HistoricalEra) => void;
+  onJumpEraInCity: (era: HistoricalEra) => void;
   onAskCrew: () => void;
   onDismissWitnessClue: () => void;
   onOpenDepartureBoard: () => void;
@@ -89,7 +104,6 @@ interface ExpeditionScreenProps {
   onOpenFinaleWarrant: () => void;
   onSelectWarrantSuspect: (suspectId: string) => void;
   onSubmitWarrant: () => void;
-  onReadAloud: (text: string) => void;
   onOpenFieldGuide: (compareIds?: string[]) => void;
   onOpenNotebook: () => void;
   onOpenPassport: () => void;
@@ -104,6 +118,8 @@ const LEVEL_TABS: { id: DifficultyLevel; short: string; full: string }[] = [
   { id: 'scholar', short: 'Scholar', full: 'Master Scholar' },
 ];
 
+const ALL_ERAS: HistoricalEra[] = ['ancient', 'sail', 'modern'];
+
 export function ExpeditionScreen({
   mission,
   currentPlayer,
@@ -114,6 +130,8 @@ export function ExpeditionScreen({
   activeSpotId,
   lastVisitedSpotId,
   activeQuestion,
+  selectedChoiceIndex,
+  selectedEra,
   latestWitnessClue,
   flyingFromId,
   flyingToId,
@@ -129,7 +147,10 @@ export function ExpeditionScreen({
   tvConnectedCode,
   onSelectSpot,
   onChangeLevel,
-  onPickAnswer,
+  onSelectChoice,
+  onConfirmAnswer,
+  onSelectEra,
+  onJumpEraInCity,
   onAskCrew,
   onDismissWitnessClue,
   onOpenDepartureBoard,
@@ -142,7 +163,6 @@ export function ExpeditionScreen({
   onOpenFinaleWarrant,
   onSelectWarrantSuspect,
   onSubmitWarrant,
-  onReadAloud,
   onOpenFieldGuide,
   onOpenNotebook,
   onOpenPassport,
@@ -158,8 +178,6 @@ export function ExpeditionScreen({
   const isCompactViewport =
     typeof window !== 'undefined' && window.innerWidth <= 1024;
 
-  // Show world atlas prominently during Departure Board & Flying; auto-collapse on tablets
-  // during town investigation, challenges, postcards, and finale so content is unobstructed!
   const defaultMapExpanded =
     turnPhase === 'departure-board' ||
     turnPhase === 'flying' ||
@@ -183,8 +201,12 @@ export function ExpeditionScreen({
   const clock = formatTravelClock(mission.hoursElapsed, mission.totalHoursBudget);
   const isControllerMode = Boolean(tvConnectedCode) && !showMapInController;
   const isMultiPlayer = mission.playerIds.length > 1;
+  const isTimeWarp = mission.missionDifficulty === 'time-warp';
+  const mapMode = mission.missionDifficulty === 'usa' ? 'usa' : 'world';
+  const diffMeta = MISSION_DIFFICULTY_INFO[mission.missionDifficulty];
   const isAtFinalTrailCity =
     !mission.isOnColdTrail &&
+    !mission.isOnWrongEra &&
     mission.trailProgressIndex >= mission.trailDestIds.length - 1;
 
   const investigatedHere = mission.investigatedSpotsByCity[mission.currentDestId] ?? [];
@@ -206,12 +228,12 @@ export function ExpeditionScreen({
 
   const renderTurnContent = (isControllerLayout: boolean) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Visual Culprit / Target Portrait & Discovered Traits */}
+      {/* Visual Culprit Portrait & Discovered Traits */}
       {turnPhase !== 'case-complete' && (
         <CulpritBadge mission={mission} onOpenNotebook={onOpenNotebook} />
       )}
 
-      {/* Active Explorer + 4-Tier Opt-In Switcher */}
+      {/* Active Explorer + Per-Player 4-Tier Quiz Switcher */}
       {turnPhase !== 'case-complete' && (
         <div
           className="paper-card"
@@ -248,7 +270,7 @@ export function ExpeditionScreen({
           {(turnPhase === 'town-hub' || turnPhase === 'spot-challenge') && (
             <div>
               <div style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--ink-muted)', marginBottom: 4 }}>
-                Opt-in difficulty tier (switch anytime):
+                Personal question tier (switch anytime):
               </div>
               <div className="level-switcher">
                 {LEVEL_TABS.map((t) => (
@@ -268,27 +290,48 @@ export function ExpeditionScreen({
       )}
 
       {/* ====================================================================
-          PHASE 1: TOWN INVESTIGATION HUB — CITY ORIENTATION MAP + 5 REAL STOPS!
+          PHASE 1: TOWN INVESTIGATION HUB — CITY ORIENTATION MAP + 5 REAL STOPS
          ==================================================================== */}
       {turnPhase === 'town-hub' && currentDest && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="paper-card" style={{ padding: '14px 16px', background: 'var(--parchment)' }}>
-            <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
-              {isAtFinalTrailCity
-                ? `★ FINAL HIDEOUT CITY • STOP ${mission.trailProgressIndex + 1} OF ${mission.trailDestIds.length}`
-                : `ON THE TRAIL • CITY ${mission.trailProgressIndex + 1} OF ${mission.trailDestIds.length}`}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
+                {isAtFinalTrailCity
+                  ? `★ FINAL HIDEOUT • STOP ${mission.trailProgressIndex + 1} OF ${mission.trailDestIds.length}`
+                  : `ON THE TRAIL • STOP ${mission.trailProgressIndex + 1} OF ${mission.trailDestIds.length}`}
+              </div>
+              {isTimeWarp && mission.currentEra && (
+                <span className="era-pill">
+                  <Hourglass size={12} /> {ERA_INFO[mission.currentEra].label}
+                </span>
+              )}
             </div>
-            <h2 style={{ fontSize: isControllerLayout ? '1.5rem' : '1.28rem', marginTop: 2 }}>
-              {currentDest.name}, {currentDest.country}
+            <h2
+              style={{
+                fontSize: isControllerLayout ? '1.48rem' : '1.26rem',
+                marginTop: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 9,
+                flexWrap: 'wrap',
+              }}
+            >
+              <MiniFlag dest={currentDest} width={32} />
+              <span>{formatDestinationShortLabel(currentDest, mission.missionDifficulty)}</span>
             </h2>
-            <p style={{ fontSize: '0.86rem', color: 'var(--ink-soft)', fontWeight: 600, marginTop: 3 }}>
+            <p style={{ fontSize: '0.86rem', color: 'var(--ink-soft)', fontWeight: 600, marginTop: 4 }}>
               “{currentDest.greeting}” — Explore any of 5 real landmarks around {currentDest.name} to
               gather clues about{' '}
-              {isAtFinalTrailCity ? 'who is hiding right here!' : 'where the trail leads next!'}
+              {isAtFinalTrailCity
+                ? 'who is hiding right here!'
+                : isTimeWarp
+                  ? 'where—and WHICH ERA—they warped to next!'
+                  : 'where the trail leads next!'}
             </p>
           </div>
 
-          {/* Illustrated Spatial City Orientation Map with Crew Avatars */}
+          {/* Illustrated Spatial City Orientation Map with Strolling Crew Avatars */}
           <CityOrientationMap
             dest={currentDest}
             layout={currentCityLayout}
@@ -301,7 +344,7 @@ export function ExpeditionScreen({
             onSelectSpot={onSelectSpot}
           />
 
-          {/* Latest Witness Clue Spotlight (just unlocked!) */}
+          {/* Latest Witness Clue Spotlight (Spartan ClueGlyph + Bold Text) */}
           {latestWitnessClue && (
             <div
               className="paper-card"
@@ -314,25 +357,34 @@ export function ExpeditionScreen({
                 gap: 8,
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                <div className="stamp-label" style={{ color: 'var(--sage-dark)' }}>
-                  ✓ NEW CLUE FROM {latestWitnessClue.witnessName.toUpperCase()} ({latestWitnessClue.spotTitle.toUpperCase()})
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() =>
-                    onReadAloud(
-                      `${latestWitnessClue.destinationClue} ${latestWitnessClue.suspectClue ?? ''}`
-                    )
-                  }
-                >
-                  <Volume2 size={14} />
-                </button>
+              <div className="stamp-label" style={{ color: 'var(--sage-dark)' }}>
+                ✓ NEW CLUE FROM {latestWitnessClue.witnessName.toUpperCase()} ({latestWitnessClue.spotTitle.toUpperCase()})
               </div>
-              <p style={{ fontWeight: 800, fontSize: '0.98rem', lineHeight: 1.45 }}>
-                {latestWitnessClue.destinationClue}
-              </p>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <ClueGlyph kind={latestWitnessClue.icon} size={24} />
+                <p style={{ fontWeight: 800, fontSize: '0.98rem', lineHeight: 1.45, margin: 0 }}>
+                  {latestWitnessClue.destinationClue}
+                </p>
+              </div>
+              {latestWitnessClue.eraClue && (
+                <div
+                  style={{
+                    padding: '8px 11px',
+                    borderRadius: 10,
+                    background: 'var(--mariner-soft)',
+                    border: '1.5px solid var(--mariner)',
+                    fontWeight: 800,
+                    fontSize: '0.88rem',
+                    color: 'var(--mariner-dark)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <ClueGlyph kind="era" size={20} />
+                  <span>{latestWitnessClue.eraClue}</span>
+                </div>
+              )}
               {latestWitnessClue.suspectClue && (
                 <div
                   style={{
@@ -343,9 +395,13 @@ export function ExpeditionScreen({
                     fontWeight: 800,
                     fontSize: '0.88rem',
                     color: 'var(--ochre-dark)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
                   }}
                 >
-                  ★ Profile Trait Logged: {latestWitnessClue.suspectClue}
+                  <ClueGlyph kind="suspect" size={20} />
+                  <span>Profile Trait Logged: {latestWitnessClue.suspectClue}</span>
                 </div>
               )}
               <button
@@ -389,7 +445,7 @@ export function ExpeditionScreen({
                     style={{
                       flex: 1,
                       padding: '11px 13px',
-                      opacity: visited ? 0.9 : 1,
+                      opacity: visited ? 0.92 : 1,
                       background: visited ? 'var(--parchment)' : 'var(--parchment-bright)',
                       borderColor: visited ? 'rgba(70,120,86,0.45)' : undefined,
                       cursor: visited ? 'default' : 'pointer',
@@ -455,8 +511,20 @@ export function ExpeditionScreen({
                         {spot.district} • Ask the {spot.witnessTitle}
                       </div>
                       {existingClue && (
-                        <div style={{ fontSize: '0.84rem', color: 'var(--ink)', fontWeight: 800, marginTop: 4, lineHeight: 1.4 }}>
-                          {existingClue.destinationClue}
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 6,
+                            fontSize: '0.84rem',
+                            color: 'var(--ink)',
+                            fontWeight: 800,
+                            marginTop: 5,
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          <ClueGlyph kind={existingClue.icon ?? 'geography'} size={17} />
+                          <span>{existingClue.destinationClue}</span>
                         </div>
                       )}
                     </div>
@@ -497,7 +565,7 @@ export function ExpeditionScreen({
               >
                 <Plane size={20} />
                 {currentCityClues.length === 0
-                  ? 'Peek at 5-City Departure Board'
+                  ? 'Peek at 5-Stop Departure Board'
                   : `Ready to Deduce? Open Departure Board (${currentCityClues.length}/5 Clues)`}
               </button>
               <button
@@ -505,7 +573,7 @@ export function ExpeditionScreen({
                 className="btn btn-secondary btn-sm"
                 onClick={() => onOpenFieldGuide(mission.departureOptions)}
               >
-                <BookOpen size={16} /> Compare My 5 Candidate Cities in Free Field Guide
+                <BookOpen size={16} /> Compare My 5 Candidate Stops in Free Field Guide
               </button>
             </div>
           )}
@@ -513,7 +581,7 @@ export function ExpeditionScreen({
       )}
 
       {/* ====================================================================
-          PHASE 2: SPOT CHALLENGE (SERIOUS 4-CHOICE CHALLENGE + FREE ALMANAC!)
+          PHASE 2: SPOT CHALLENGE — 2-STEP CONFIRM ANSWER (NO ACCIDENTAL TAPS!)
          ==================================================================== */}
       {turnPhase === 'spot-challenge' && activeQuestion && activeSpotObj && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -521,27 +589,14 @@ export function ExpeditionScreen({
             <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
               {activeSpotObj.name.toUpperCase()} • {activeQuestion.category.toUpperCase()}
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() =>
-                  onReadAloud(
-                    `${activeQuestion.prompt} Options: ${activeQuestion.choices.join(', ')}`
-                  )
-                }
-              >
-                <Volume2 size={15} /> Read
-              </button>
-              <button
-                type="button"
-                className="btn btn-sage btn-sm"
-                onClick={() => onOpenFieldGuide()}
-                title="Always free to research!"
-              >
-                <BookOpen size={15} /> Field Guide (Free)
-              </button>
-            </div>
+            <button
+              type="button"
+              className="btn btn-sage btn-sm"
+              onClick={() => onOpenFieldGuide()}
+              title="Always free to research!"
+            >
+              <BookOpen size={15} /> Field Guide (Free)
+            </button>
           </div>
 
           <h2 style={{ fontSize: isControllerLayout ? '1.35rem' : '1.14rem', lineHeight: 1.36 }}>
@@ -551,21 +606,41 @@ export function ExpeditionScreen({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {activeQuestion.choices.map((choice, idx) => {
               const tried = triedChoiceIndices.includes(idx);
+              const selected = selectedChoiceIndex === idx && !tried;
               return (
                 <button
                   key={`${choice}-${idx}`}
                   type="button"
                   disabled={tried}
-                  className={`answer-btn ${tried ? 'tried' : ''}`}
+                  className={`answer-btn ${tried ? 'tried' : ''} ${selected ? 'selected' : ''}`}
                   style={{ fontSize: isControllerLayout ? '1.08rem' : '0.96rem', padding: '12px 14px' }}
-                  onClick={() => onPickAnswer(idx)}
+                  onClick={() => onSelectChoice(idx)}
                 >
                   <span className="answer-letter">{['A', 'B', 'C', 'D'][idx]}</span>
-                  <span>{choice}</span>
+                  <span style={{ flex: 1 }}>{choice}</span>
+                  {selected && (
+                    <span className="stamp-label" style={{ fontSize: '0.68rem', color: 'var(--mariner-dark)' }}>
+                      SELECTED
+                    </span>
+                  )}
                 </button>
               );
             })}
           </div>
+
+          {/* Dedicated Confirm Answer Step */}
+          <button
+            type="button"
+            className="btn btn-terracotta btn-lg"
+            style={{ width: '100%' }}
+            disabled={selectedChoiceIndex === null}
+            onClick={onConfirmAnswer}
+          >
+            <Check size={20} />
+            {selectedChoiceIndex !== null
+              ? `Confirm Answer (${['A', 'B', 'C', 'D'][selectedChoiceIndex]})`
+              : 'Tap an Option Above, Then Confirm'}
+          </button>
 
           {showGentleHint && !crewHelped && (
             <div className="hint-box">
@@ -597,17 +672,17 @@ export function ExpeditionScreen({
       )}
 
       {/* ====================================================================
-          PHASE 3: 5-DESTINATION DEPARTURE BOARD (DEDUCE THE RIGHT TRAIL!)
+          PHASE 3: 5-STOP DEPARTURE BOARD (+ CHRONO-DIAL IN LEVEL 4 TIME-WARP!)
          ==================================================================== */}
       {turnPhase === 'departure-board' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <div>
               <div className="stamp-label" style={{ color: 'var(--terracotta)' }}>
-                DEPARTURE BOARD • DEDUCE THE NEXT CITY
+                DEPARTURE BOARD • {diffMeta.shortLabel.toUpperCase()}
               </div>
               <h2 style={{ fontSize: '1.3rem', marginTop: 2 }}>
-                Where Did the Trail Go Next?
+                {isTimeWarp ? 'Set Chrono-Dial & Choose Destination!' : 'Where Did the Trail Go Next?'}
               </h2>
             </div>
             {!mission.isOnColdTrail && (
@@ -617,9 +692,9 @@ export function ExpeditionScreen({
             )}
           </div>
 
-          {/* Inline Bold Clue Recap from Last Valid City */}
+          {/* Inline Bold Clue Recap with Spartan ClueGlyphs */}
           <div className="paper-card" style={{ padding: '11px 13px', background: 'var(--ochre-soft)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span className="stamp-label" style={{ color: 'var(--ochre-dark)', fontSize: '0.7rem' }}>
                 YOUR CLUES FROM {lastValidDest?.name.toUpperCase()} ({currentCityClues.length}/5)
               </span>
@@ -637,23 +712,64 @@ export function ExpeditionScreen({
                 You haven’t gathered any town clues yet! Flying blind risks a Cold Trail—head back to town to interview locals first!
               </p>
             ) : (
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.88rem', fontWeight: 800, lineHeight: 1.45 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                 {currentCityClues.map((c, idx) => (
-                  <li key={idx} style={{ marginBottom: 4 }}>
-                    {c.destinationClue}
-                  </li>
+                  <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.88rem', fontWeight: 800, lineHeight: 1.4 }}>
+                      <ClueGlyph kind={c.icon ?? 'geography'} size={18} />
+                      <span>{c.destinationClue}</span>
+                    </div>
+                    {c.eraClue && (
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.84rem', fontWeight: 800, color: 'var(--mariner-dark)', paddingLeft: 6 }}>
+                        <ClueGlyph kind="era" size={17} />
+                        <span>{c.eraClue}</span>
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </div>
 
-          {/* 5 Spread-Out Plausible Candidate Flights */}
+          {/* LEVEL 4 TIME-WARP: CHRONO-DIAL ERA SELECTOR */}
+          {isTimeWarp && (
+            <div className="paper-card" style={{ padding: '12px 14px', background: 'var(--mariner-soft)', borderColor: 'var(--mariner)' }}>
+              <div className="stamp-label" style={{ color: 'var(--mariner-dark)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <ClueGlyph kind="era" size={18} /> STEP 1: SET YOUR CHRONO-DIAL ERA BEFORE LAUNCH
+              </div>
+              <div className="chrono-dial-grid">
+                {ALL_ERAS.map((eraId) => {
+                  const info = ERA_INFO[eraId];
+                  const active = selectedEra === eraId;
+                  return (
+                    <button
+                      key={eraId}
+                      type="button"
+                      className={`chrono-btn ${active ? 'active' : ''}`}
+                      onClick={() => onSelectEra(eraId)}
+                    >
+                      <div style={{ fontWeight: 900, fontSize: '0.86rem' }}>{info.shortLabel}</div>
+                      <div style={{ fontSize: '0.7rem', opacity: active ? 0.92 : 0.78 }}>{info.years}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 5 Spread-Out Candidate Flights with Miniature Flags */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {isTimeWarp && (
+              <div className="stamp-label" style={{ color: 'var(--ink-muted)' }}>
+                STEP 2: LAUNCH BALLOON TO TARGET CITY ({ERA_INFO[selectedEra].label.toUpperCase()})
+              </div>
+            )}
             {mission.departureOptions.map((destId) => {
               const dest = DESTINATIONS_BY_ID[destId];
               if (!dest || !currentDest) return null;
               const miles = computeDistanceMiles(currentDest.coords, dest.coords);
               const hours = computeFlightHours(currentDest.id, dest.id);
+              const us = getUsStateMeta(dest.id);
               return (
                 <button
                   key={dest.id}
@@ -661,13 +777,16 @@ export function ExpeditionScreen({
                   className="route-choice-btn"
                   onClick={() => onFlyToDestination(dest.id)}
                 >
-                  <AnimalAvatar avatar={dest.animalAvatar} size={42} />
+                  <MiniFlag dest={dest} width={38} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1.05rem' }}>
-                      {dest.country} — {dest.name}
+                      {mission.missionDifficulty === 'usa' && us
+                        ? `${us.stateName} — ${dest.name}`
+                        : `${dest.country} — ${dest.name}`}
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--ink-soft)', fontWeight: 700 }}>
-                      {dest.continent} • {miles.toLocaleString()} mi • Flight time: <strong>{hours}h</strong>
+                      {mission.missionDifficulty === 'usa' && us ? us.region : dest.continent} •{' '}
+                      {miles.toLocaleString()} mi • Flight: <strong>{hours}h</strong>
                     </div>
                   </div>
                   <Plane size={19} color="var(--terracotta)" style={{ flexShrink: 0 }} />
@@ -692,7 +811,69 @@ export function ExpeditionScreen({
       )}
 
       {/* ====================================================================
-          PHASE 5: COLD TRAIL DRAMA (WRONG CITY!)
+          PHASE 5A: TIME SLIP! (LEVEL 4 RIGHT CITY, WRONG CENTURY!)
+         ==================================================================== */}
+      {turnPhase === 'time-slip' && currentDest && (
+        <div
+          className="paper-card"
+          style={{
+            padding: '20px 18px',
+            background: 'var(--mariner-soft)',
+            border: '2px solid var(--mariner)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div className="stamp-label" style={{ color: 'var(--mariner-dark)', display: 'flex', alignItems: 'center', gap: 7 }}>
+            <ClueGlyph kind="era" size={20} /> TIME SLIP — RIGHT CITY, WRONG CENTURY!
+          </div>
+          <h2 style={{ fontSize: '1.42rem', display: 'flex', alignItems: 'center', gap: 9 }}>
+            <MiniFlag dest={currentDest} width={32} />
+            <span>You Found {currentDest.name}, But Not in {ERA_INFO[selectedEra].label}!</span>
+          </h2>
+          <p style={{ fontSize: '0.94rem', lineHeight: 1.5, fontWeight: 700, color: 'var(--ink)' }}>
+            Great geography deduction—the Chrono-Balloon definitely landed right here in{' '}
+            <strong>{currentDest.name}</strong>! Re-read your Chrono-Dial clue below and re-tune your
+            era right here (costs 6 hours):
+          </p>
+
+          {currentCityClues.some((c) => c.eraClue) && (
+            <div className="paper-card" style={{ padding: 12 }}>
+              {currentCityClues
+                .filter((c) => c.eraClue)
+                .map((c, idx) => (
+                  <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontWeight: 800, fontSize: '0.9rem' }}>
+                    <ClueGlyph kind="era" size={19} />
+                    <span>{c.eraClue}</span>
+                  </div>
+                ))}
+            </div>
+          )}
+
+          <div className="chrono-dial-grid">
+            {ALL_ERAS.map((eraId) => {
+              const info = ERA_INFO[eraId];
+              const triedCurrent = eraId === selectedEra;
+              return (
+                <button
+                  key={eraId}
+                  type="button"
+                  disabled={triedCurrent}
+                  className={`chrono-btn ${triedCurrent ? 'tried' : ''}`}
+                  onClick={() => onJumpEraInCity(eraId)}
+                >
+                  <div style={{ fontWeight: 900, fontSize: '0.88rem' }}>{info.shortLabel}</div>
+                  <div style={{ fontSize: '0.72rem', opacity: 0.8 }}>{info.years}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+          PHASE 5B: COLD TRAIL DRAMA (WRONG CITY!)
          ==================================================================== */}
       {turnPhase === 'cold-trail' && currentDest && lastValidDest && (
         <div
@@ -709,27 +890,29 @@ export function ExpeditionScreen({
           <div className="stamp-label" style={{ color: 'var(--terracotta-dark)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <AlertTriangle size={17} /> COLD TRAIL — WRONG DESTINATION!
           </div>
-          <h2 style={{ fontSize: '1.45rem' }}>
-            Nobody Spotted Them in {currentDest.name}!
+          <h2 style={{ fontSize: '1.45rem', display: 'flex', alignItems: 'center', gap: 9 }}>
+            <MiniFlag dest={currentDest} width={32} />
+            <span>Nobody Spotted Them in {currentDest.name}!</span>
           </h2>
           <p style={{ fontSize: '0.94rem', lineHeight: 1.5, fontWeight: 700, color: 'var(--ink)' }}>
-            We searched the landmarks of <strong>{currentDest.country}</strong>, but the trail is
-            completely cold! That detour burned precious hours on the Travel Clock—let’s compare our{' '}
-            <strong>{lastValidDest.name}</strong> clues against the free Field Guide!
+            We searched the landmarks of <strong>{formatDestinationShortLabel(currentDest, mission.missionDifficulty)}</strong>,
+            but the trail is completely cold! Compare your <strong>{lastValidDest.name}</strong> clues
+            against the free Field Guide!
           </p>
 
           {currentCityClues.length > 0 && (
             <div className="paper-card" style={{ padding: 12 }}>
-              <div className="stamp-label" style={{ color: 'var(--mariner)', fontSize: '0.7rem', marginBottom: 4 }}>
+              <div className="stamp-label" style={{ color: 'var(--mariner)', fontSize: '0.7rem', marginBottom: 6 }}>
                 RE-READ YOUR CLUES FROM {lastValidDest.name.toUpperCase()}
               </div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.88rem', fontWeight: 800, lineHeight: 1.45 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {currentCityClues.map((c, idx) => (
-                  <li key={idx} style={{ marginBottom: 4 }}>
-                    {c.destinationClue}
-                  </li>
+                  <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.88rem', fontWeight: 800, lineHeight: 1.45 }}>
+                    <ClueGlyph kind={c.icon ?? 'geography'} size={18} />
+                    <span>{c.destinationClue}</span>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
 
@@ -739,14 +922,14 @@ export function ExpeditionScreen({
               className="btn btn-sage"
               onClick={() => onOpenFieldGuide(mission.departureOptions)}
             >
-              <BookOpen size={18} /> Compare the 5 Candidate Cities in Free Field Guide
+              <BookOpen size={18} /> Compare the 5 Candidate Stops in Free Field Guide
             </button>
             <button
               type="button"
               className="btn btn-terracotta"
               onClick={onOpenDepartureBoard}
             >
-              <Plane size={18} /> Reroute Directly to Another Candidate City
+              <Plane size={18} /> Reroute Directly to Another Candidate Stop
             </button>
             <button
               type="button"
@@ -780,15 +963,14 @@ export function ExpeditionScreen({
           >
             <Sparkles size={17} />
             {isAtFinalTrailCity
-              ? `JACKPOT! You tracked the trail all the way to ${postcardDest.country}!`
-              : `HOT TRAIL! Witnesses just spotted them in ${postcardDest.country}!`}
+              ? `JACKPOT! You tracked the culprit all the way to ${postcardDest.name}!`
+              : `HOT TRAIL! Witnesses just spotted them in ${postcardDest.name}!`}
           </div>
 
           <TimeFlipPostcard
             destination={postcardDest}
             flipped={postcardFlipped}
             onToggleFlip={onTogglePostcardFlip}
-            onReadAloud={onReadAloud}
             isNewDiscovery={celebratingNewDiscovery}
           />
 
@@ -815,15 +997,15 @@ export function ExpeditionScreen({
               ★ FINAL SHOWDOWN IN {currentDest?.name.toUpperCase()} ★
             </div>
             <h2 style={{ fontSize: '1.42rem', marginTop: 3 }}>
-              Name the Match to Crack the Case!
+              Issue the Warrant to Catch the Thief!
             </h2>
             <p style={{ fontSize: '0.88rem', color: 'var(--ink-soft)', fontWeight: 700, marginTop: 4 }}>
-              Review the profile traits your crew collected across the journey and lock in the matching dossier card:
+              Match the profile traits your crew collected across the journey and lock in the right suspect:
             </p>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
               {Object.values(mission.discoveredSuspectTraits).length === 0 ? (
                 <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--terracotta-dark)' }}>
-                  No traits collected yet — tap “Back to Town” to interview witnesses here first!
+                  No traits collected yet — tap “More Clues” to interview witnesses here first!
                 </span>
               ) : (
                 Object.values(mission.discoveredSuspectTraits).map((val, i) => (
@@ -929,17 +1111,13 @@ export function ExpeditionScreen({
               <div className="stamp-label" style={{ color: 'var(--sage-dark)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <Award size={17} /> CASE SOLVED • {(mission.medal ?? 'gold').toUpperCase()} SLEUTH MEDAL!
               </div>
-              <h2 style={{ fontSize: '1.7rem' }}>
-                {mission.kind === 'wonder-chase'
-                  ? `You Caught ${culprit.name}!`
-                  : `You Found ${culprit.name}!`}
-              </h2>
+              <h2 style={{ fontSize: '1.7rem' }}>You Caught {culprit.name}!</h2>
               <p style={{ fontStyle: 'italic', color: 'var(--mariner-dark)', fontWeight: 700, fontSize: '1rem' }}>
                 {culprit.catchphrase}
               </p>
               <p style={{ color: 'var(--ink-soft)', fontWeight: 600, lineHeight: 1.5, fontSize: '0.94rem' }}>
                 Your detective crew recovered <strong>{mission.stolenOrTargetItem}</strong> across{' '}
-                <strong>{mission.trailDestIds.length} world cities</strong> with{' '}
+                <strong>{mission.trailDestIds.length} stops</strong> ({diffMeta.label}) with{' '}
                 <strong>{clock.daysRemainingText}</strong> to spare!
               </p>
             </>
@@ -1015,9 +1193,12 @@ export function ExpeditionScreen({
           >
             {mission.title}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginTop: 2 }}>
             <span className={`clock-pill ${clock.isUrgent ? 'urgent' : ''}`}>
               <Clock size={13} /> Day {clock.currentDay} • {clock.timeOfDay} • {clock.daysRemainingText}
+            </span>
+            <span className="stamp-label" style={{ fontSize: '0.68rem', color: 'var(--mariner)' }}>
+              {diffMeta.shortLabel}
             </span>
           </div>
         </div>
@@ -1067,7 +1248,7 @@ export function ExpeditionScreen({
     );
   }
 
-  // SINGLE-SCREEN / CAST MODE (NATURAL SCROLL + COLLAPSIBLE ATLAS)
+  // SINGLE-SCREEN / CAST MODE
   return (
     <div className={`expedition-shell ${isMapExpanded ? 'split-open' : ''}`}>
       {headerBar}
@@ -1082,6 +1263,7 @@ export function ExpeditionScreen({
               visitedDestIds={mission.visitedDestIds}
               discoveredDestIds={discoveredDestIds}
               routeOptions={turnPhase === 'departure-board' ? mission.departureOptions : []}
+              mapMode={mapMode}
               crewAvatars={crewAvatars}
               flyingFromId={turnPhase === 'flying' ? flyingFromId : null}
               flyingToId={turnPhase === 'flying' ? flyingToId : null}
@@ -1094,8 +1276,11 @@ export function ExpeditionScreen({
           <div className="map-collapsed-bar">
             <button type="button" className="map-collapsed-btn" onClick={toggleMapExpanded}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <MapIcon size={17} />
-                World Atlas Map Collapsed ({currentDest?.name}, {currentDest?.country})
+                {currentDest && <MiniFlag dest={currentDest} width={24} />}
+                <span>
+                  {mapMode === 'usa' ? '50-State USA Map' : 'World Atlas Map'} Collapsed (
+                  {currentDest ? formatDestinationShortLabel(currentDest, mission.missionDifficulty) : ''})
+                </span>
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 Show Map <ChevronDown size={17} />

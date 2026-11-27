@@ -14,7 +14,7 @@ Open on your Android tablet, laptop, or Google TV browser:
 
 You have two effortless ways to play on your TV:
 
-1. **Jackbox-Style TV + Tablet Mode:**
+1. **TV + Tablet Living Room Mode:**
    - Open the live link in a Google TV browser app (like *BrowseHere* or *TV Bro*) and tap **Open TV Big Screen on This Device**.
    - On your Android tablet, open the same link, tap **Connect Tablet to a TV**, and enter the 4-letter room code (or scan the QR code shown on the TV).
    - Your tablet stays the **Keeper of the Passport** (saving all player profiles, active missions, and collected postcards) and beams the live map, flights, questions, and 3D postcard flips straight onto the TV!

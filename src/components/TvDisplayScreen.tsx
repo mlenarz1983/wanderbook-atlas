@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Award,
   Clock,
+  Hourglass,
   RefreshCw,
   ShieldCheck,
   Smartphone,
@@ -13,7 +14,12 @@ import {
   Users,
 } from 'lucide-react';
 import { SUSPECTS_BY_ID } from '../data/cases';
-import { DESTINATIONS, DESTINATIONS_BY_ID } from '../data/destinations';
+import {
+  DESTINATIONS,
+  DESTINATIONS_BY_ID,
+  formatDestinationShortLabel,
+} from '../data/destinations';
+import { ERA_INFO } from '../data/destinations/usStatesMeta';
 import { getCityLayout } from '../data/landmarks';
 import type { LiveSessionState } from '../types/game';
 import { formatTravelClock } from '../utils/storage';
@@ -25,7 +31,9 @@ import {
   type TvReceiverHandle,
 } from '../utils/tvSync';
 import { AnimalAvatar } from './art/AnimalAvatar';
+import { ClueGlyph } from './art/ClueGlyph';
 import { BalloonEmblem } from './art/CompassRose';
+import { MiniFlag } from './art/MiniFlag';
 import { CityOrientationMap } from './CityOrientationMap';
 import { CulpritBadge } from './CulpritBadge';
 import { FlightJourneyCard } from './FlightJourneyCard';
@@ -44,7 +52,7 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
   const [hostNote, setHostNote] = useState<string | null>(null);
   const [liveState, setLiveState] = useState<LiveSessionState | null>(null);
 
-  // Direction 2: TV enters a Tablet's 4-letter code!
+  // Direction 2: TV enters a Tablet's 4-letter code
   const [tabletCodeInput, setTabletCodeInput] = useState('');
   const [joiningTablet, setJoiningTablet] = useState(false);
   const [joinTabletError, setJoinTabletError] = useState<string | null>(null);
@@ -166,9 +174,12 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
   const isAtFinalTrailCity = Boolean(
     activeMission &&
       !activeMission.isOnColdTrail &&
+      !activeMission.isOnWrongEra &&
       activeMission.trailProgressIndex >= activeMission.trailDestIds.length - 1
   );
   const flightDurationMs = liveState?.flightDurationMs ?? 6500;
+  const mapMode = activeMission?.missionDifficulty === 'usa' ? 'usa' : 'world';
+  const isTimeWarp = activeMission?.missionDifficulty === 'time-warp';
 
   return (
     <div className="tv-shell">
@@ -183,6 +194,7 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
             ? activeMission.departureOptions
             : []
         }
+        mapMode={mapMode}
         crewAvatars={crewAvatars}
         flyingFromId={liveState?.turnPhase === 'flying' ? liveState.flyingFromId : null}
         flyingToId={liveState?.turnPhase === 'flying' ? liveState.flyingToId : null}
@@ -207,6 +219,11 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
                 <span className={`clock-pill ${clock.isUrgent ? 'urgent' : ''}`}>
                   <Clock size={13} /> Day {clock.currentDay} • {clock.daysRemainingText}
                 </span>
+                {isTimeWarp && activeMission?.currentEra && (
+                  <span className="era-pill">
+                    <Hourglass size={12} /> {ERA_INFO[activeMission.currentEra].shortLabel}
+                  </span>
+                )}
               </div>
             ) : (
               <div style={{ fontSize: '0.82rem', color: 'var(--ink-soft)', fontWeight: 700 }}>
@@ -413,10 +430,10 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
       {controllerConnected && liveState?.screen === 'home' && (
         <div className="tv-floating-card tv-stage-panel" style={{ textAlign: 'center' }}>
           <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
-            FAMILY PASSPORT SYNCED • {liveState.discoveredDestIds.length} / {DESTINATIONS.length} WORLD STOPS STAMPED
+            FAMILY PASSPORT SYNCED • {liveState.discoveredDestIds.length} / {DESTINATIONS.length} STOPS STAMPED
           </div>
           <h2 style={{ fontSize: '1.85rem', marginTop: 4 }}>
-            Pick or Launch a Mystery Case on the Tablet!
+            Pick or Launch a Detective Case on the Tablet!
           </h2>
         </div>
       )}
@@ -441,12 +458,12 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
               BROWSING MASTER PASSPORT
             </div>
             <h2 style={{ fontSize: '1.75rem', marginTop: 4 }}>
-              {liveState.discoveredDestIds.length} of {DESTINATIONS.length} World Wonders Unlocked
+              {liveState.discoveredDestIds.length} of {DESTINATIONS.length} World & US Stops Unlocked
             </h2>
           </div>
         ))}
 
-      {/* PAIRED: TOWN HUB — ILLUSTRATED CITY MAP + ALWAYS-BOLD CLUES */}
+      {/* PAIRED: TOWN HUB — ILLUSTRATED CITY MAP + MINI FLAG + ALWAYS-BOLD CLUES WITH GLYPHS */}
       {controllerConnected &&
         liveState?.screen === 'expedition' &&
         liveState.turnPhase === 'town-hub' &&
@@ -475,9 +492,12 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
             />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
-                INVESTIGATING {currentDest.name.toUpperCase()}, {currentDest.country.toUpperCase()} • CITY{' '}
-                {activeMission.trailProgressIndex + 1} OF {activeMission.trailDestIds.length}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                <MiniFlag dest={currentDest} width={32} />
+                <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
+                  {formatDestinationShortLabel(currentDest, activeMission.missionDifficulty).toUpperCase()} • STOP{' '}
+                  {activeMission.trailProgressIndex + 1} OF {activeMission.trailDestIds.length}
+                </div>
               </div>
 
               {liveState.latestWitnessClue ? (
@@ -485,29 +505,50 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
                   <h2 style={{ fontSize: '1.42rem', color: 'var(--sage-dark)' }}>
                     New Lead from {liveState.latestWitnessClue.witnessName} ({liveState.latestWitnessClue.spotTitle})!
                   </h2>
-                  <p className="tv-clue-text" style={{ marginTop: 8 }}>
-                    {liveState.latestWitnessClue.destinationClue}
-                  </p>
+                  <div className="tv-clue-text tv-clue-row" style={{ marginTop: 8 }}>
+                    <ClueGlyph kind={liveState.latestWitnessClue.icon} size={24} />
+                    <span>{liveState.latestWitnessClue.destinationClue}</span>
+                  </div>
+                  {liveState.latestWitnessClue.eraClue && (
+                    <div
+                      className="tv-clue-row"
+                      style={{
+                        marginTop: 8,
+                        padding: '8px 12px',
+                        borderRadius: 10,
+                        background: 'var(--mariner-soft)',
+                        border: '1.5px solid var(--mariner)',
+                        color: 'var(--mariner-dark)',
+                        fontWeight: 900,
+                        fontSize: '1rem',
+                      }}
+                    >
+                      <ClueGlyph kind="era" size={21} />
+                      <span>{liveState.latestWitnessClue.eraClue}</span>
+                    </div>
+                  )}
                   {liveState.latestWitnessClue.suspectClue && (
                     <div
+                      className="tv-clue-row"
                       style={{
-                        marginTop: 9,
+                        marginTop: 8,
                         padding: '8px 12px',
                         borderRadius: 10,
                         background: 'var(--ochre-soft)',
                         border: '1.5px solid var(--ochre)',
                         color: 'var(--ochre-dark)',
                         fontWeight: 900,
-                        fontSize: '1.02rem',
+                        fontSize: '1rem',
                       }}
                     >
-                      ★ Profile Clue: {liveState.latestWitnessClue.suspectClue}
+                      <ClueGlyph kind="suspect" size={21} />
+                      <span>Profile Clue: {liveState.latestWitnessClue.suspectClue}</span>
                     </div>
                   )}
                 </div>
               ) : (
                 <div>
-                  <h2 style={{ fontSize: '1.46rem', lineHeight: 1.25 }}>
+                  <h2 style={{ fontSize: '1.44rem', lineHeight: 1.25 }}>
                     {currentPlayer?.name}, pick any of the 5 real spots in {currentDest.name} on the tablet!
                   </h2>
                   {currentCityClues.length > 0 && (
@@ -516,8 +557,9 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
                         CLUES COLLECTED IN {currentDest.name.toUpperCase()}
                       </div>
                       {currentCityClues.map((c, idx) => (
-                        <div key={idx} className="tv-clue-text">
-                          • {c.destinationClue}
+                        <div key={idx} className="tv-clue-text tv-clue-row">
+                          <ClueGlyph kind={c.icon ?? 'geography'} size={22} />
+                          <span>{c.destinationClue}</span>
                         </div>
                       ))}
                     </div>
@@ -528,17 +570,20 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
           </div>
         )}
 
-      {/* PAIRED: SPOT CHALLENGE (4 CHOICES ON TV!) */}
+      {/* PAIRED: SPOT CHALLENGE (4 CHOICES + SELECTED HIGHLIGHT BEFORE CONFIRM!) */}
       {controllerConnected &&
         liveState?.screen === 'expedition' &&
         liveState.turnPhase === 'spot-challenge' &&
         activeQuestion && (
           <div className="tv-floating-card tv-stage-panel">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
-                {currentLayout.landmarks.find((s) => s.id === liveState.activeSpotId)?.name.toUpperCase() ??
-                  currentDest.name.toUpperCase()}{' '}
-                • {liveState.activeLevel.toUpperCase()} CHALLENGE
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <MiniFlag dest={currentDest} width={28} />
+                <div className="stamp-label" style={{ color: 'var(--mariner)' }}>
+                  {currentLayout.landmarks.find((s) => s.id === liveState.activeSpotId)?.name.toUpperCase() ??
+                    currentDest.name.toUpperCase()}{' '}
+                  • {liveState.activeLevel.toUpperCase()} CHALLENGE
+                </div>
               </div>
               {liveState.crewHelped && (
                 <span
@@ -564,14 +609,23 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
               {activeQuestion.choices.map((choice, idx) => {
                 const tried = liveState.triedChoiceIndices.includes(idx);
+                const selected = liveState.selectedChoiceIndex === idx && !tried;
                 return (
                   <div
                     key={`${choice}-${idx}`}
                     style={{
                       padding: '10px 14px',
                       borderRadius: 12,
-                      background: tried ? 'var(--parchment-deep)' : 'var(--parchment-bright)',
-                      border: tried ? '2px dashed rgba(43,35,29,0.2)' : '2px solid rgba(43,35,29,0.28)',
+                      background: selected
+                        ? 'var(--mariner-soft)'
+                        : tried
+                          ? 'var(--parchment-deep)'
+                          : 'var(--parchment-bright)',
+                      border: selected
+                        ? '2.5px solid var(--mariner)'
+                        : tried
+                          ? '2px dashed rgba(43,35,29,0.2)'
+                          : '2px solid rgba(43,35,29,0.28)',
                       opacity: tried ? 0.48 : 1,
                       fontWeight: 800,
                       fontSize: '1.02rem',
@@ -599,25 +653,49 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
           </div>
         )}
 
-      {/* PAIRED: DEPARTURE BOARD — ALWAYS-BOLD CLUE SUMMARY */}
+      {/* PAIRED: DEPARTURE BOARD — ALWAYS-BOLD CLUE SUMMARY WITH GLYPHS */}
       {controllerConnected &&
         liveState?.screen === 'expedition' &&
         liveState.turnPhase === 'departure-board' &&
         activeMission && (
           <div className="tv-floating-card tv-stage-panel">
-            <div className="stamp-label" style={{ color: 'var(--terracotta)' }}>
-              DEPARTURE DEDUCTION — 5 SPREAD-OUT CANDIDATE CITIES ON THE ATLAS
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <div className="stamp-label" style={{ color: 'var(--terracotta)' }}>
+                DEPARTURE DEDUCTION — 5 CANDIDATE STOPS ON THE ATLAS
+              </div>
+              {isTimeWarp && liveState.selectedEra && (
+                <span className="era-pill">
+                  <Hourglass size={13} /> Chrono-Dial: {ERA_INFO[liveState.selectedEra].label}
+                </span>
+              )}
             </div>
-            <h2 style={{ fontSize: '1.52rem', marginTop: 3 }}>
-              Which City Matches Your Clues?
+            <h2 style={{ fontSize: '1.5rem', marginTop: 3 }}>
+              {isTimeWarp
+                ? 'Which City & Era Match Your Clues?'
+                : 'Which Stop Matches Your Clues?'}
             </h2>
             {currentCityClues.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
                 {currentCityClues.map((c, i) => (
-                  <div key={i} className="tv-clue-text">
-                    • {c.destinationClue}
+                  <div key={i} className="tv-clue-text tv-clue-row">
+                    <ClueGlyph kind={c.icon ?? 'geography'} size={22} />
+                    <span>{c.destinationClue}</span>
                   </div>
                 ))}
+                {isTimeWarp &&
+                  currentCityClues
+                    .filter((c) => c.eraClue)
+                    .slice(0, 1)
+                    .map((c, i) => (
+                      <div
+                        key={`era-${i}`}
+                        className="tv-clue-text tv-clue-row"
+                        style={{ borderLeftColor: 'var(--mariner)', background: 'var(--mariner-soft)' }}
+                      >
+                        <ClueGlyph kind="era" size={22} />
+                        <span>{c.eraClue}</span>
+                      </div>
+                    ))}
               </div>
             )}
           </div>
@@ -639,6 +717,24 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
           </div>
         )}
 
+      {/* PAIRED: TIME SLIP! */}
+      {controllerConnected &&
+        liveState?.screen === 'expedition' &&
+        liveState.turnPhase === 'time-slip' && (
+          <div
+            className="tv-floating-card tv-stage-panel"
+            style={{ borderColor: 'var(--mariner)', background: 'rgba(218,236,238,0.97)' }}
+          >
+            <div className="stamp-label" style={{ color: 'var(--mariner-dark)', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <ClueGlyph kind="era" size={20} /> TIME SLIP IN {currentDest.name.toUpperCase()}!
+            </div>
+            <h2 style={{ fontSize: '1.7rem', marginTop: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <MiniFlag dest={currentDest} width={34} />
+              <span>Right City — Wrong Century! Re-Tune the Chrono-Dial on the Tablet!</span>
+            </h2>
+          </div>
+        )}
+
       {/* PAIRED: COLD TRAIL */}
       {controllerConnected &&
         liveState?.screen === 'expedition' &&
@@ -651,16 +747,18 @@ export function TvDisplayScreen({ onExit }: TvDisplayScreenProps) {
               className="stamp-label"
               style={{ color: 'var(--terracotta-dark)', display: 'flex', alignItems: 'center', gap: 6 }}
             >
-              <AlertTriangle size={18} /> COLD TRAIL IN {currentDest.country.toUpperCase()}!
+              <AlertTriangle size={18} /> COLD TRAIL IN {currentDest.name.toUpperCase()}!
             </div>
-            <h2 style={{ fontSize: '1.7rem', marginTop: 4 }}>
-              Nobody Spotted Them in {currentDest.name}!
+            <h2 style={{ fontSize: '1.7rem', marginTop: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <MiniFlag dest={currentDest} width={34} />
+              <span>Nobody Spotted Them in {currentDest.name}!</span>
             </h2>
             {currentCityClues.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
                 {currentCityClues.map((c, i) => (
-                  <div key={i} className="tv-clue-text">
-                    • {c.destinationClue}
+                  <div key={i} className="tv-clue-text tv-clue-row">
+                    <ClueGlyph kind={c.icon ?? 'geography'} size={22} />
+                    <span>{c.destinationClue}</span>
                   </div>
                 ))}
               </div>

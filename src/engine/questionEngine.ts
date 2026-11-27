@@ -1,10 +1,14 @@
 import { CURATED_QUESTIONS } from '../data/curatedQuestions';
 import { DESTINATIONS, DESTINATIONS_BY_ID } from '../data/destinations';
+import { getUsStateMeta } from '../data/destinations/usStatesMeta';
 import type {
   CaseKind,
   CityLandmark,
+  ClueIconKind,
   Destination,
   DifficultyLevel,
+  HistoricalEra,
+  MissionDifficulty,
   Player,
   QuizQuestion,
   SpotRole,
@@ -537,15 +541,18 @@ export function selectSpotQuestion(params: {
 }
 
 /**
- * Generates a Carmen Sandiego witness clue whose phrasing automatically accommodates
- * the LOWEST-LEVEL explorer on the team (`clueLevel`) so 7-8 year olds understand
- * every clue clearly without dense local jargon—while STILL keeping real deduction!
+ * Generates a witness clue whose phrasing automatically accommodates the LOWEST-LEVEL
+ * explorer on the team (`clueLevel`), includes a Spartan SVG icon (`ClueIconKind`),
+ * tailors clues specifically for US States in Level 1 (`usa`), and adds Historical Era
+ * clues in Level 4 (`time-warp`)!
  */
 export function generateWitnessClue(params: {
   spot: CityLandmark;
   nextDest: Destination | null;
   culprit: SuspectProfile;
   caseKind: CaseKind;
+  missionDifficulty: MissionDifficulty;
+  targetEra?: HistoricalEra | null;
   clueLevel: DifficultyLevel;
   discoveredTraits: Partial<
     Record<'accessory' | 'favoriteTreat' | 'companion' | 'hobby', string>
@@ -556,18 +563,12 @@ export function generateWitnessClue(params: {
     spot,
     nextDest,
     culprit,
-    caseKind,
+    missionDifficulty,
+    targetEra,
     clueLevel,
     discoveredTraits,
     dropSuspectTrait,
   } = params;
-
-  const subjectWord =
-    caseKind === 'wonder-chase'
-      ? 'the sneaky culprit'
-      : caseKind === 'lost-explorer'
-        ? 'the missing explorer'
-        : 'the rare creature’s trail';
 
   let suspectClue: string | null = null;
   let suspectTraitKey: 'accessory' | 'favoriteTreat' | 'companion' | 'hobby' | undefined;
@@ -617,47 +618,108 @@ export function generateWitnessClue(params: {
       spotId: spot.id,
       spotTitle: spot.name,
       witnessName: spot.witnessTitle,
-      destinationClue: `“STOP! They never left town! ${subjectWord.charAt(0).toUpperCase() + subjectWord.slice(1)} was just spotted right near ${spot.name}—issue your Case Warrant!”`,
+      icon: 'suspect',
+      destinationClue: `“STOP! The culprit never left town! They were just spotted right near ${spot.name}—issue your Case Warrant!”`,
+      eraClue: null,
       suspectClue,
       suspectTraitKey,
       suspectTraitValue,
     };
   }
 
-  const mysteryMoney = mysteryCurrencyName(nextDest);
-  const domain = mapRoleToDomain(spot.role);
-  let destinationClue = '';
-
-  // KID-FRIENDLY / SIMPLIFIED CLUE MODE whenever an Explorer (6–8) is on the team!
-  if (clueLevel === 'explorer') {
-    if (domain === 'harbor') {
-      destinationClue = `“I saw ${subjectWord} flying toward ${nextDest.continent}! Look for a place with ${nextDest.climate} where you might meet a ${nextDest.animalName}!”`;
-    } else if (domain === 'market') {
-      destinationClue = `“They traded their coins for ${mysteryMoney}, smiled while saying ‘${nextDest.greeting}’, and packed a flag with ${nextDest.flagDescription}!”`;
+  // Optional Level 4 Time-Warp Era Clue (Ancient / Age of Sail / Modern)
+  let eraClue: string | null = null;
+  if (missionDifficulty === 'time-warp' && targetEra) {
+    if (targetEra === 'ancient') {
+      eraClue =
+        clueLevel === 'explorer'
+          ? 'Chrono-Dial Clue: Their time balloon jumped WAY back to the Ancient World (pyramids, stone temples, before 1200 CE)!'
+          : 'Chrono-Dial Clue: Temporal ripple traced to the Ancient World (before 1200 CE — ancient empires, carvings & first cities).';
+    } else if (targetEra === 'sail') {
+      eraClue =
+        clueLevel === 'explorer'
+          ? 'Chrono-Dial Clue: They warped into the Age of Sail & Silk (tall wooden ships, castles & caravans, 1200–1840 CE)!'
+          : 'Chrono-Dial Clue: Temporal ripple traced to the Age of Sail & Silk (1200–1840 CE — trade caravans, galleons & charters).';
     } else {
-      destinationClue = `“They were super excited to visit ${nextDest.worldWonder} in ${nextDest.continent} and try ${nextDest.famousFood}!”`;
+      eraClue =
+        clueLevel === 'explorer'
+          ? 'Chrono-Dial Clue: They jumped into the Industrial & Modern Era (trains, rockets & modern landmarks, 1840–Today)!'
+          : 'Chrono-Dial Clue: Temporal ripple traced to the Industrial & Modern Era (1840–Today — railways, bridges & modern wonders).';
     }
-  } else if (clueLevel === 'navigator') {
-    if (domain === 'harbor') {
-      destinationClue = `“They charted a flight to ${nextDest.continent} (${nextDest.hemisphere} Hemisphere), heading near ${nextDest.waterway} and ${nextDest.landform}.”`;
-    } else if (domain === 'market') {
-      destinationClue = `“They exchanged money for ${mysteryMoney}, practiced saying ‘${nextDest.greeting}’ in ${nextDest.languages[0]}, and carried a tag with ${nextDest.flagDescription}.”`;
+  }
+
+  const domain = mapRoleToDomain(spot.role);
+  const usMeta = missionDifficulty === 'usa' ? getUsStateMeta(nextDest.id) : null;
+  let destinationClue = '';
+  let icon: ClueIconKind = 'geography';
+
+  // LEVEL 1: ACROSS THE USA (50 STATES) — tailored US state clues (never redundant USD/North America!)
+  if (missionDifficulty === 'usa' && usMeta) {
+    if (spot.role === 'harbor' || spot.role === 'nature') {
+      icon = spot.role === 'nature' ? 'wildlife' : 'geography';
+      destinationClue =
+        clueLevel === 'explorer'
+          ? `“They flew toward the ${usMeta.region}! Look for a state known as ‘${usMeta.nickname}’ near ${nextDest.waterway}!”`
+          : `“Flight path heads to the ${usMeta.region}—aimed right near ${nextDest.waterway} and ${nextDest.landform}.”`;
+    } else if (spot.role === 'market') {
+      icon = Math.random() < 0.5 ? 'food' : 'flag';
+      destinationClue =
+        icon === 'food'
+          ? `“They were craving ${nextDest.famousFood} and bragging about visiting ‘${usMeta.nickname}’!”`
+          : `“Their suitcase bore a state flag with ${nextDest.flagDescription}, headed toward state capital ${usMeta.stateCapital}!”`;
+    } else if (spot.role === 'landmark') {
+      icon = 'landmark';
+      destinationClue = `“They bought a postcard of ${nextDest.worldWonder} and said their next stop is in the ${usMeta.region}!”`;
     } else {
+      icon = 'flag';
       const m = nextDest.history[0];
-      destinationClue = `“They checked out our story about ‘${m.title}’ (${m.era}) and wanted to see ${nextDest.worldWonder}!”`;
+      destinationClue =
+        clueLevel === 'explorer'
+          ? `“They read a story about ‘${m.title}’ and carried a flag showing ${nextDest.flagDescription}!”`
+          : `“Archive request for ‘${m.title}’ (${m.era})—state capital is ${usMeta.stateCapital} (${usMeta.region}).”`;
     }
   } else {
-    // Cartographer / Master Scholar (all older kids or adults!)
-    if (domain === 'harbor') {
-      destinationClue = `“Flight log points to ${nextDest.subregion} (${nextDest.latLabel})—heading straight toward ${nextDest.waterway} and ${nextDest.landform}.”`;
-    } else if (domain === 'market') {
-      destinationClue = `“Currency receipt shows ${mysteryMoney}. Luggage tag featured ${nextDest.flagDescription}, and they spoke ${nextDest.languages[0]}.”`;
+    // GLOBAL WORLD MODES (Iconic World / Full World / Time-Warp)
+    const mysteryMoney = mysteryCurrencyName(nextDest);
+
+    if (clueLevel === 'explorer') {
+      if (domain === 'harbor') {
+        icon = spot.role === 'nature' ? 'wildlife' : 'geography';
+        destinationClue = `“I saw the thief flying toward ${nextDest.continent}! Look for a place with ${nextDest.climate} where you might meet a ${nextDest.animalName}!”`;
+      } else if (domain === 'market') {
+        icon = 'currency';
+        destinationClue = `“They traded their coins for ${mysteryMoney}, smiled while saying ‘${nextDest.greeting}’, and packed a flag with ${nextDest.flagDescription}!”`;
+      } else {
+        icon = spot.role === 'landmark' ? 'landmark' : 'food';
+        destinationClue = `“They were super excited to visit ${nextDest.worldWonder} in ${nextDest.continent} and try ${nextDest.famousFood}!”`;
+      }
+    } else if (clueLevel === 'navigator') {
+      if (domain === 'harbor') {
+        icon = 'geography';
+        destinationClue = `“They charted a flight to ${nextDest.continent} (${nextDest.hemisphere} Hemisphere), heading near ${nextDest.waterway} and ${nextDest.landform}.”`;
+      } else if (domain === 'market') {
+        icon = 'flag';
+        destinationClue = `“They exchanged money for ${mysteryMoney}, practiced saying ‘${nextDest.greeting}’ in ${nextDest.languages[0]}, and carried a flag with ${nextDest.flagDescription}.”`;
+      } else {
+        icon = 'landmark';
+        const m = nextDest.history[0];
+        destinationClue = `“They checked out our story about ‘${m.title}’ (${m.era}) and wanted to see ${nextDest.worldWonder}!”`;
+      }
     } else {
-      const m = Math.random() < 0.5 ? nextDest.history[0] : nextDest.history[1];
-      const capBit = !nextDest.capital.toLowerCase().startsWith('no ')
-        ? ` near capital ${nextDest.capital}`
-        : '';
-      destinationClue = `“Archive slip requested records from ${m.era} (‘${m.title}’)${capBit}. Compare your 5 flight options in the Field Guide!”`;
+      if (domain === 'harbor') {
+        icon = 'geography';
+        destinationClue = `“Flight log points to ${nextDest.subregion} (${nextDest.latLabel})—heading straight toward ${nextDest.waterway} and ${nextDest.landform}.”`;
+      } else if (domain === 'market') {
+        icon = 'currency';
+        destinationClue = `“Currency receipt shows ${mysteryMoney}. Luggage tag featured ${nextDest.flagDescription}, and they spoke ${nextDest.languages[0]}.”`;
+      } else {
+        icon = missionDifficulty === 'time-warp' ? 'era' : 'landmark';
+        const m = Math.random() < 0.5 ? nextDest.history[0] : nextDest.history[1];
+        const capBit = !nextDest.capital.toLowerCase().startsWith('no ')
+          ? ` near capital ${nextDest.capital}`
+          : '';
+        destinationClue = `“Archive slip requested records from ${m.era} (‘${m.title}’)${capBit}. Compare your 5 options in the Field Guide!”`;
+      }
     }
   }
 
@@ -665,7 +727,9 @@ export function generateWitnessClue(params: {
     spotId: spot.id,
     spotTitle: spot.name,
     witnessName: spot.witnessTitle,
+    icon,
     destinationClue,
+    eraClue,
     suspectClue,
     suspectTraitKey,
     suspectTraitValue,

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { geoGraticule10, geoNaturalEarth1, geoPath } from 'd3-geo';
+import { geoAlbersUsa, geoGraticule10, geoNaturalEarth1, geoPath } from 'd3-geo';
 import { feature } from 'topojson-client';
 import type { Topology, GeometryCollection } from 'topojson-specification';
+import usStatesAtlas from 'us-atlas/states-10m.json';
 import countriesAtlas from 'world-atlas/countries-110m.json';
 import { CONTINENT_FILLS, getContinentForCountryId } from '../data/continentMap';
 import { DESTINATIONS, DESTINATIONS_BY_ID } from '../data/destinations';
+import { US_50_STATE_DEST_IDS, getUsStateMeta } from '../data/destinations/usStatesMeta';
 import type { AvatarId } from '../types/game';
 import { AnimalAvatar } from './art/AnimalAvatar';
 import { CompassRose } from './art/CompassRose';
@@ -13,11 +15,15 @@ const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 540;
 const DEFAULT_FLIGHT_MS = 6500;
 
+const US_STATE_FILLS = ['#E8DFC2', '#D8E3CE', '#ECE2C8', '#D6E0D6', '#E5D8B8'];
+const US_50_SET = new Set(US_50_STATE_DEST_IDS);
+
 interface WorldAtlasMapProps {
   currentDestId: string;
   visitedDestIds: string[];
   discoveredDestIds: string[];
   routeOptions: string[];
+  mapMode?: 'world' | 'usa';
   crewAvatars?: AvatarId[];
   flyingFromId?: string | null;
   flyingToId?: string | null;
@@ -35,13 +41,16 @@ function getArcCurve(
   const dx = p2[0] - p1[0];
   const dy = p2[1] - p1[1];
   const dist = Math.hypot(dx, dy);
-  const lift = Math.min(96, Math.max(30, dist * 0.25));
+  const lift = Math.min(96, Math.max(28, dist * 0.24));
   const cx = (p1[0] + p2[0]) / 2;
   const cy = (p1[1] + p2[1]) / 2 - lift;
   return {
     d: `M ${p1[0]} ${p1[1]} Q ${cx} ${cy} ${p2[0]} ${p2[1]}`,
     cp: [cx, cy],
-    mid: [0.25 * p1[0] + 0.5 * cx + 0.25 * p2[0], 0.25 * p1[1] + 0.5 * cy + 0.25 * p2[1]],
+    mid: [
+      0.25 * p1[0] + 0.5 * cx + 0.25 * p2[0],
+      0.25 * p1[1] + 0.5 * cy + 0.25 * p2[1],
+    ],
   };
 }
 
@@ -63,6 +72,7 @@ export function WorldAtlasMap({
   visitedDestIds,
   discoveredDestIds,
   routeOptions,
+  mapMode = 'world',
   crewAvatars = [],
   flyingFromId = null,
   flyingToId = null,
@@ -74,6 +84,7 @@ export function WorldAtlasMap({
 }: WorldAtlasMapProps) {
   const [hoveredRoute, setHoveredRoute] = useState<string | null>(null);
   const [flightProgress, setFlightProgress] = useState(0);
+  const isUsaMode = mapMode === 'usa';
 
   // Animate hot-air balloon smoothly along curved route during the voyage
   useEffect(() => {
@@ -86,7 +97,6 @@ export function WorldAtlasMap({
 
     const tick = (now: number) => {
       const raw = Math.min(1, (now - start) / duration);
-      // Gentle ease-in-out sine curve so takeoff & landing feel floaty and calm
       const eased = -(Math.cos(Math.PI * raw) - 1) / 2;
       setFlightProgress(eased);
       if (raw < 1) {
@@ -97,7 +107,8 @@ export function WorldAtlasMap({
     return () => cancelAnimationFrame(frameId);
   }, [flyingFromId, flyingToId, flightDurationMs]);
 
-  const { projection, pathGen, countries, graticulePath, spherePath } = useMemo(() => {
+  // World Natural Earth projection + features
+  const worldGeo = useMemo(() => {
     const proj = geoNaturalEarth1()
       .scale(194)
       .translate([MAP_WIDTH / 2, MAP_HEIGHT / 2 + 16]);
@@ -115,14 +126,37 @@ export function WorldAtlasMap({
     };
   }, []);
 
+  // Dedicated 50-State USA Albers projection + state features (for Level 1 Across the USA!)
+  const usaGeo = useMemo(() => {
+    const proj = geoAlbersUsa()
+      .scale(1040)
+      .translate([MAP_WIDTH / 2 + 10, MAP_HEIGHT / 2 + 14]);
+    const generator = geoPath(proj);
+    const topology = usStatesAtlas as unknown as Topology<{
+      states: GeometryCollection;
+    }>;
+    const fc = feature(topology, topology.objects.states);
+    return {
+      projection: proj,
+      pathGen: generator,
+      states: fc.features,
+    };
+  }, []);
+
+  const visibleDestinations = useMemo(
+    () => (isUsaMode ? DESTINATIONS.filter((d) => US_50_SET.has(d.id)) : DESTINATIONS),
+    [isUsaMode]
+  );
+
   const destPositions = useMemo(() => {
     const map: Record<string, [number, number]> = {};
-    for (const d of DESTINATIONS) {
-      const pt = projection(d.coords);
+    const proj = isUsaMode ? usaGeo.projection : worldGeo.projection;
+    for (const d of visibleDestinations) {
+      const pt = proj(d.coords);
       if (pt) map[d.id] = [pt[0], pt[1]];
     }
     return map;
-  }, [projection]);
+  }, [isUsaMode, usaGeo.projection, worldGeo.projection, visibleDestinations]);
 
   const currentPos = useMemo<[number, number]>(
     () => destPositions[currentDestId] ?? [500, 260],
@@ -132,7 +166,6 @@ export function WorldAtlasMap({
   const visitedSet = useMemo(() => new Set(visitedDestIds), [visitedDestIds]);
   const routeSet = useMemo(() => new Set(routeOptions), [routeOptions]);
 
-  // Compute animated balloon coordinates, trailing flight wake & gentle breeze sway
   const flightVisuals = useMemo(() => {
     if (
       flyingFromId &&
@@ -145,7 +178,6 @@ export function WorldAtlasMap({
       const { cp } = getArcCurve(p1, p2);
       const pos = pointOnQuad(p1, cp, p2, flightProgress);
 
-      // Sample points along the arc from 0 up to current flightProgress for a drawn trail
       const steps = 28;
       const wakePts: string[] = [];
       for (let i = 0; i <= steps; i++) {
@@ -154,7 +186,6 @@ export function WorldAtlasMap({
         wakePts.push(`${pt[0].toFixed(1)},${pt[1].toFixed(1)}`);
       }
 
-      // Three trailing sparkle/cloud puffs right behind the balloon
       const puffs = [0.04, 0.085, 0.13]
         .map((lag) => Math.max(0, flightProgress - lag))
         .filter((t) => t > 0.01)
@@ -183,7 +214,6 @@ export function WorldAtlasMap({
 
   const balloonPos = flightVisuals.balloonPos;
 
-  // Visited trail segments in order
   const visitedSegments = useMemo(() => {
     const segs: string[] = [];
     for (let i = 0; i < visitedDestIds.length - 1; i++) {
@@ -196,7 +226,7 @@ export function WorldAtlasMap({
     return segs;
   }, [visitedDestIds, destPositions]);
 
-  // Deterministic 2D label collision avoidance + leader lines so nearby pins NEVER overlap on TV or tablet!
+  // Deterministic 2D label collision avoidance + leader lines so nearby pins NEVER overlap!
   const placedLabels = useMemo(() => {
     interface LabelBox {
       id: string;
@@ -211,7 +241,7 @@ export function WorldAtlasMap({
     }
 
     const boxes: LabelBox[] = [];
-    for (const dest of DESTINATIONS) {
+    for (const dest of visibleDestinations) {
       const pos = destPositions[dest.id];
       if (!pos) continue;
       const isCurrent = dest.id === currentDestId && !flyingToId;
@@ -222,11 +252,18 @@ export function WorldAtlasMap({
       if (!(isRouteOption || isCurrent || isFlightTarget || isFlightOrigin || isHovered)) {
         continue;
       }
+
+      const us = getUsStateMeta(dest.id);
       const labelText =
-        dest.name !== dest.country && dest.name.length + dest.country.length <= 22
-          ? `${dest.name}, ${dest.country}`
-          : dest.country;
-      const w = Math.max(76, labelText.length * 6.4 + 26);
+        isUsaMode && us
+          ? `${dest.name}, ${us.code}`
+          : dest.name !== dest.country && dest.name.length + dest.country.length <= 22
+            ? `${dest.name}, ${dest.country}`
+            : us
+              ? `${dest.name}, ${us.code}`
+              : dest.country;
+
+      const w = Math.max(76, labelText.length * 6.5 + 26);
       const h = 23;
       const defaultDy = pos[1] < 95 ? 26 : -22;
       boxes.push({
@@ -242,7 +279,6 @@ export function WorldAtlasMap({
       });
     }
 
-    // 18 relaxation passes gently push overlapping bubbles apart and away from pin anchors
     for (let iter = 0; iter < 18; iter++) {
       for (let i = 0; i < boxes.length; i++) {
         for (let j = i + 1; j < boxes.length; j++) {
@@ -273,7 +309,6 @@ export function WorldAtlasMap({
           }
         }
 
-        // Also keep labels from sitting directly on top of another visible pin
         const box = boxes[i];
         for (let k = 0; k < boxes.length; k++) {
           if (k === i) continue;
@@ -292,7 +327,16 @@ export function WorldAtlasMap({
     }
 
     return boxes;
-  }, [destPositions, currentDestId, flyingFromId, flyingToId, routeSet, hoveredRoute]);
+  }, [
+    visibleDestinations,
+    destPositions,
+    currentDestId,
+    flyingFromId,
+    flyingToId,
+    routeSet,
+    hoveredRoute,
+    isUsaMode,
+  ]);
 
   const basketAvatars = crewAvatars.slice(0, 4);
 
@@ -319,7 +363,11 @@ export function WorldAtlasMap({
           filter: 'drop-shadow(0 12px 28px rgba(21, 66, 73, 0.18))',
         }}
         role="img"
-        aria-label="Interactive Storybook World Atlas"
+        aria-label={
+          isUsaMode
+            ? 'Interactive 50-State United States Storybook Atlas'
+            : 'Interactive Storybook World Atlas'
+        }
       >
         <defs>
           <radialGradient id="atlasOceanGrad" cx="50%" cy="46%" r="58%">
@@ -331,84 +379,171 @@ export function WorldAtlasMap({
             <feDropShadow dx="0" dy="2" stdDeviation="2.2" floodColor="#1F5A63" floodOpacity="0.22" />
           </filter>
           <clipPath id="atlasGlobeClip">
-            <path d={spherePath} />
+            {isUsaMode ? (
+              <rect x="16" y="10" width={MAP_WIDTH - 32} height={MAP_HEIGHT - 20} rx="22" />
+            ) : (
+              <path d={worldGeo.spherePath} />
+            )}
           </clipPath>
         </defs>
 
-        {/* Cartographer Ocean Oval */}
-        <path
-          d={spherePath}
-          fill="url(#atlasOceanGrad)"
-          stroke="#2B231D"
-          strokeWidth="2.2"
-        />
-        <path
-          d={spherePath}
-          fill="none"
-          stroke="#FBF5E8"
-          strokeWidth="1.2"
-          strokeDasharray="6 5"
-          opacity="0.7"
-        />
+        {/* Cartographer Ocean Frame (Rounded Chart for USA 50-State Mode, Oval Globe for World Mode) */}
+        {isUsaMode ? (
+          <>
+            <rect
+              x="16"
+              y="10"
+              width={MAP_WIDTH - 32}
+              height={MAP_HEIGHT - 20}
+              rx="22"
+              fill="url(#atlasOceanGrad)"
+              stroke="#2B231D"
+              strokeWidth="2.2"
+            />
+            <rect
+              x="22"
+              y="16"
+              width={MAP_WIDTH - 44}
+              height={MAP_HEIGHT - 32}
+              rx="17"
+              fill="none"
+              stroke="#FBF5E8"
+              strokeWidth="1.2"
+              strokeDasharray="6 5"
+              opacity="0.72"
+            />
+          </>
+        ) : (
+          <>
+            <path
+              d={worldGeo.spherePath}
+              fill="url(#atlasOceanGrad)"
+              stroke="#2B231D"
+              strokeWidth="2.2"
+            />
+            <path
+              d={worldGeo.spherePath}
+              fill="none"
+              stroke="#FBF5E8"
+              strokeWidth="1.2"
+              strokeDasharray="6 5"
+              opacity="0.7"
+            />
+          </>
+        )}
 
         <g clipPath="url(#atlasGlobeClip)">
-          {/* Subtle Latitude & Longitude Graticules */}
-          <path
-            d={graticulePath}
-            fill="none"
-            stroke="#1F5A63"
-            strokeOpacity="0.14"
-            strokeWidth="0.75"
-          />
+          {isUsaMode ? (
+            <>
+              {/* Subtle Cartographer Grid on US Chart */}
+              <g stroke="#1F5A63" strokeOpacity="0.11" strokeWidth="0.75">
+                {[140, 280, 420, 560, 700, 840].map((gx) => (
+                  <line key={`ugx-${gx}`} x1={gx} y1="10" x2={gx} y2={MAP_HEIGHT - 10} />
+                ))}
+                {[110, 210, 310, 410].map((gy) => (
+                  <line key={`ugy-${gy}`} x1="16" y1={gy} x2={MAP_WIDTH - 16} y2={gy} />
+                ))}
+              </g>
 
-          {/* Equator Line */}
-          <line
-            x1="0"
-            y1={projection([0, 0])?.[1] ?? 286}
-            x2={MAP_WIDTH}
-            y2={projection([0, 0])?.[1] ?? 286}
-            stroke="#C88A2B"
-            strokeOpacity="0.4"
-            strokeWidth="1.2"
-            strokeDasharray="6 6"
-          />
+              {/* US Chart Cartouche & Ocean Labels */}
+              <g
+                fontFamily="Fraunces, Georgia, serif"
+                fontStyle="italic"
+                fill="#1F5A63"
+                opacity="0.52"
+                fontSize="13"
+                letterSpacing="0.14em"
+                style={{ pointerEvents: 'none', userSelect: 'none' }}
+              >
+                <text x="58" y="210">PACIFIC</text>
+                <text x="64" y="228">OCEAN</text>
+                <text x="868" y="280">ATLANTIC</text>
+                <text x="876" y="298">OCEAN</text>
+                <text x="540" y="486" fontSize="12">GULF OF MEXICO</text>
+                <text x="410" y="48" fontSize="13">UNITED STATES • 50 STATES</text>
+              </g>
 
-          {/* Ocean Typography */}
-          <g
-            fontFamily="Fraunces, Georgia, serif"
-            fontStyle="italic"
-            fill="#1F5A63"
-            opacity="0.48"
-            fontSize="14"
-            letterSpacing="0.16em"
-            style={{ pointerEvents: 'none', userSelect: 'none' }}
-          >
-            <text x="128" y="290">PACIFIC OCEAN</text>
-            <text x="342" y="242">ATLANTIC</text>
-            <text x="355" y="260">OCEAN</text>
-            <text x="645" y="346">INDIAN OCEAN</text>
-            <text x="415" y="458" fontSize="12">SOUTHERN OCEAN</text>
-            <text x="430" y="64" fontSize="11">ARCTIC OCEAN</text>
-          </g>
+              {/* All 50 Illustrated US States */}
+              <g filter="url(#landShadow)">
+                {usaGeo.states.map((feat, idx) => {
+                  const d = usaGeo.pathGen(feat);
+                  if (!d) return null;
+                  const numId = Number(feat.id ?? idx);
+                  const fill = US_STATE_FILLS[numId % US_STATE_FILLS.length];
+                  return (
+                    <path
+                      key={`us-state-${feat.id ?? idx}`}
+                      d={d}
+                      fill={fill}
+                      stroke="#5C4E43"
+                      strokeOpacity="0.52"
+                      strokeWidth="1.05"
+                    />
+                  );
+                })}
+              </g>
+            </>
+          ) : (
+            <>
+              {/* Subtle Latitude & Longitude Graticules */}
+              <path
+                d={worldGeo.graticulePath}
+                fill="none"
+                stroke="#1F5A63"
+                strokeOpacity="0.14"
+                strokeWidth="0.75"
+              />
 
-          {/* Stylized Botanical Continents */}
-          <g filter="url(#landShadow)">
-            {countries.map((feat, idx) => {
-              const cont = getContinentForCountryId(feat.id);
-              const d = pathGen(feat);
-              if (!d) return null;
-              return (
-                <path
-                  key={`${feat.id ?? idx}`}
-                  d={d}
-                  fill={CONTINENT_FILLS[cont]}
-                  stroke="#5C4E43"
-                  strokeOpacity="0.34"
-                  strokeWidth="0.65"
-                />
-              );
-            })}
-          </g>
+              {/* Equator Line */}
+              <line
+                x1="0"
+                y1={worldGeo.projection([0, 0])?.[1] ?? 286}
+                x2={MAP_WIDTH}
+                y2={worldGeo.projection([0, 0])?.[1] ?? 286}
+                stroke="#C88A2B"
+                strokeOpacity="0.4"
+                strokeWidth="1.2"
+                strokeDasharray="6 6"
+              />
+
+              {/* Ocean Typography */}
+              <g
+                fontFamily="Fraunces, Georgia, serif"
+                fontStyle="italic"
+                fill="#1F5A63"
+                opacity="0.48"
+                fontSize="14"
+                letterSpacing="0.16em"
+                style={{ pointerEvents: 'none', userSelect: 'none' }}
+              >
+                <text x="128" y="290">PACIFIC OCEAN</text>
+                <text x="342" y="242">ATLANTIC</text>
+                <text x="355" y="260">OCEAN</text>
+                <text x="645" y="346">INDIAN OCEAN</text>
+                <text x="415" y="458" fontSize="12">SOUTHERN OCEAN</text>
+                <text x="430" y="64" fontSize="11">ARCTIC OCEAN</text>
+              </g>
+
+              {/* Stylized Botanical Continents */}
+              <g filter="url(#landShadow)">
+                {worldGeo.countries.map((feat, idx) => {
+                  const cont = getContinentForCountryId(feat.id);
+                  const d = worldGeo.pathGen(feat);
+                  if (!d) return null;
+                  return (
+                    <path
+                      key={`${feat.id ?? idx}`}
+                      d={d}
+                      fill={CONTINENT_FILLS[cont]}
+                      stroke="#5C4E43"
+                      strokeOpacity="0.34"
+                      strokeWidth="0.65"
+                    />
+                  );
+                })}
+              </g>
+            </>
+          )}
 
           {/* Previously Flown Expedition Trail */}
           {visitedSegments.map((seg, i) => (
@@ -445,7 +580,7 @@ export function WorldAtlasMap({
             </g>
           )}
 
-          {/* Active Flight Arc (when flying) — Guide Dotted Line + Progressive Drawn Golden Wake */}
+          {/* Active Flight Arc */}
           {flyingFromId && flyingToId && destPositions[flyingFromId] && destPositions[flyingToId] && (
             <g>
               <path
@@ -482,7 +617,7 @@ export function WorldAtlasMap({
             </g>
           )}
 
-          {/* Available Story Routes Radiating From Current Location */}
+          {/* Available Story Routes */}
           {!flyingToId &&
             routeOptions.map((targetId) => {
               const targetPos = destPositions[targetId];
@@ -498,7 +633,6 @@ export function WorldAtlasMap({
                   onMouseLeave={() => setHoveredRoute(null)}
                   onClick={() => interactive && onSelectRoute?.(targetId)}
                 >
-                  {/* Wide transparent hit zone */}
                   <path d={d} fill="none" stroke="transparent" strokeWidth="18" />
                   <path
                     d={d}
@@ -514,8 +648,8 @@ export function WorldAtlasMap({
               );
             })}
 
-          {/* All 210 World Destination Pins */}
-          {DESTINATIONS.map((dest) => {
+          {/* Destination Pins */}
+          {visibleDestinations.map((dest) => {
             const pos = destPositions[dest.id];
             if (!pos) return null;
             const isCurrent = dest.id === currentDestId && !flyingToId;
@@ -545,7 +679,6 @@ export function WorldAtlasMap({
                   }
                 }}
               >
-                {/* Pulsing Beacon for Route Options or Landing Destination */}
                 {(isRouteOption || isFlightTarget) && (
                   <circle
                     r={isFlightTarget ? '16' : '13'}
@@ -555,7 +688,6 @@ export function WorldAtlasMap({
                   />
                 )}
 
-                {/* Pin Base */}
                 <circle
                   r={
                     isFlightTarget
@@ -567,8 +699,12 @@ export function WorldAtlasMap({
                         : isCurrent || isFlightOrigin
                           ? 7.5
                           : isDiscovered
-                            ? 3.8
-                            : 2.1
+                            ? isUsaMode
+                              ? 5
+                              : 3.8
+                            : isUsaMode
+                              ? 3.4
+                              : 2.1
                   }
                   fill={
                     isRouteOption || isFlightTarget
@@ -580,11 +716,10 @@ export function WorldAtlasMap({
                           : '#FBF5E8'
                   }
                   stroke="#2B231D"
-                  strokeWidth={isRouteOption || isCurrent || isFlightTarget ? '2.1' : '0.85'}
-                  opacity={isRouteOption || isCurrent || isFlightTarget || isDiscovered ? 1 : 0.65}
+                  strokeWidth={isRouteOption || isCurrent || isFlightTarget ? '2.1' : '0.9'}
+                  opacity={isRouteOption || isCurrent || isFlightTarget || isDiscovered ? 1 : 0.72}
                 />
 
-                {/* Inner Star/Dot */}
                 {(isRouteOption || isFlightTarget) && (
                   <circle r={3} fill="#FBF5E8" />
                 )}
@@ -592,7 +727,7 @@ export function WorldAtlasMap({
             );
           })}
 
-          {/* Collision-Free Label Pills with Leader Lines for Nearby Cities */}
+          {/* Collision-Free Label Pills with Leader Lines */}
           <g style={{ pointerEvents: 'none' }}>
             {placedLabels.map((box) => {
               const dist = Math.hypot(box.lx - box.px, box.ly - box.py);
@@ -637,11 +772,10 @@ export function WorldAtlasMap({
             })}
           </g>
 
-          {/* Crew's Striped Hot-Air Balloon with Tiny Crew Avatars Riding in the Basket! */}
+          {/* Crew's Striped Hot-Air Balloon with Tiny Crew Avatars Riding in the Basket */}
           <g transform={`translate(${balloonPos[0]}, ${balloonPos[1] - 28})`}>
             <g transform={`rotate(${flightVisuals.swayDeg.toFixed(1)})`}>
               <g className="balloon-bob">
-                {/* Soft ground shadow */}
                 <ellipse
                   cx="0"
                   cy={flyingToId ? 34 : 28}
@@ -650,7 +784,6 @@ export function WorldAtlasMap({
                   fill="#2B231D"
                   opacity={flyingToId ? 0.14 : 0.22}
                 />
-                {/* Balloon Envelope */}
                 <path
                   d="M0 -24 C-12.5 -24 -18 -15 -18 -5 C-18 4 -10 9.5 -5.5 14 L5.5 14 C10 9.5 18 4 18 -5 C18 -15 12.5 -24 0 -24 Z"
                   fill="#C4533A"
@@ -667,10 +800,8 @@ export function WorldAtlasMap({
                   d="M0 -24 C-2.2 -15 -2.8 -5 -1.6 14 L1.6 14 C2.8 -5 2.2 -15 0 -24 Z"
                   fill="#C88A2B"
                 />
-                {/* Basket Ropes */}
                 <line x1="-5" y1="14" x2="-8" y2="21" stroke="#2B231D" strokeWidth="1.35" />
                 <line x1="5" y1="14" x2="8" y2="21" stroke="#2B231D" strokeWidth="1.35" />
-                {/* Tiny Crew Avatars Peeking Above Basket Rim! */}
                 {basketAvatars.length > 0 && (
                   <g>
                     {basketAvatars.map((av, idx) => {
@@ -689,7 +820,6 @@ export function WorldAtlasMap({
                     })}
                   </g>
                 )}
-                {/* Wicker Basket */}
                 <rect
                   x={basketAvatars.length > 1 ? -11 : -7}
                   y="20.5"

@@ -4,6 +4,7 @@ import { SUSPECTS_BY_ID } from '../data/cases';
 import { DESTINATIONS_BY_ID } from '../data/destinations';
 import type { CaseMission, SuspectProfile } from '../types/game';
 import { AnimalAvatar } from './art/AnimalAvatar';
+import { ClueGlyph } from './art/ClueGlyph';
 
 interface CaseNotebookModalProps {
   mission: CaseMission;
@@ -32,13 +33,6 @@ export function CaseNotebookModal({
   const olderClues = mission.cluesLog.filter(
     (c) => c.cityId !== mission.lastValidDestId
   );
-
-  const subjectWord =
-    mission.kind === 'wonder-chase'
-      ? 'Suspect Warrant'
-      : mission.kind === 'lost-explorer'
-        ? 'Explorer Profile'
-        : 'Wildlife Match';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -76,7 +70,7 @@ export function CaseNotebookModal({
             className={`btn btn-sm ${tab === 'warrant' ? 'btn-terracotta' : 'btn-secondary'}`}
             onClick={() => setTab('warrant')}
           >
-            <ShieldCheck size={16} /> {subjectWord} ({discoveredTraitEntries.length}/4 Traits)
+            <ShieldCheck size={16} /> Suspect Warrant ({discoveredTraitEntries.length}/4 Traits)
           </button>
         </div>
 
@@ -98,7 +92,7 @@ export function CaseNotebookModal({
               </h3>
               {currentCityClues.length === 0 ? (
                 <p style={{ color: 'var(--ink-muted)', fontWeight: 700, fontSize: '0.92rem' }}>
-                  No town spots investigated here yet—visit the Harbor, Market, or History Archive to gather clues!
+                  No landmarks investigated here yet—visit any of the 5 real spots around town to gather clues!
                 </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -107,9 +101,32 @@ export function CaseNotebookModal({
                       <div className="stamp-label" style={{ color: 'var(--terracotta)', fontSize: '0.72rem' }}>
                         {entry.spotTitle} • {entry.witnessName}
                       </div>
-                      <p style={{ fontWeight: 700, fontSize: '0.96rem', marginTop: 4, lineHeight: 1.45 }}>
-                        {entry.destinationClue}
-                      </p>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, marginTop: 6 }}>
+                        <ClueGlyph kind={entry.icon ?? 'geography'} size={21} />
+                        <p style={{ fontWeight: 800, fontSize: '0.96rem', lineHeight: 1.45, margin: 0 }}>
+                          {entry.destinationClue}
+                        </p>
+                      </div>
+                      {entry.eraClue && (
+                        <div
+                          style={{
+                            marginTop: 8,
+                            padding: '7px 10px',
+                            borderRadius: 10,
+                            background: 'var(--mariner-soft)',
+                            border: '1px solid rgba(31,90,99,0.35)',
+                            fontSize: '0.86rem',
+                            fontWeight: 800,
+                            color: 'var(--mariner-dark)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                          }}
+                        >
+                          <ClueGlyph kind="era" size={18} />
+                          <span>{entry.eraClue}</span>
+                        </div>
+                      )}
                       {entry.suspectClue && (
                         <div
                           style={{
@@ -121,9 +138,13 @@ export function CaseNotebookModal({
                             fontSize: '0.86rem',
                             fontWeight: 800,
                             color: 'var(--ochre-dark)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
                           }}
                         >
-                          ★ Profile Clue: {entry.suspectClue}
+                          <ClueGlyph kind="suspect" size={18} />
+                          <span>{entry.suspectClue}</span>
                         </div>
                       )}
                     </div>
@@ -147,7 +168,7 @@ export function CaseNotebookModal({
                       <div className="stamp-label" style={{ color: 'var(--ink-muted)', fontSize: '0.68rem' }}>
                         {DESTINATIONS_BY_ID[entry.cityId]?.name} • {entry.spotTitle}
                       </div>
-                      <p style={{ marginTop: 3, fontWeight: 600 }}>{entry.destinationClue}</p>
+                      <p style={{ marginTop: 3, fontWeight: 700 }}>{entry.destinationClue}</p>
                       {entry.suspectClue && (
                         <div style={{ marginTop: 4, color: 'var(--ochre-dark)', fontWeight: 800 }}>
                           ★ {entry.suspectClue}
@@ -161,7 +182,7 @@ export function CaseNotebookModal({
           </div>
         )}
 
-        {/* TAB 2: SUSPECT / MYSTERY PROFILE WARRANT */}
+        {/* TAB 2: SUSPECT WARRANT */}
         {tab === 'warrant' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div className="paper-card" style={{ padding: 14, background: 'var(--ochre-soft)' }}>

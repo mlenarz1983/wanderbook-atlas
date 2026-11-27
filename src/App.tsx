@@ -33,6 +33,7 @@ import {
   computeFlightAnimationMs,
   computeFlightHours,
 } from './data/destinations';
+import { MISSION_DIFFICULTY_INFO } from './data/destinations/usStatesMeta';
 import { getCityLayout } from './data/landmarks';
 import {
   generateWitnessClue,
@@ -41,28 +42,18 @@ import {
 } from './engine/questionEngine';
 import type {
   AvatarId,
-  CaseKind,
   CaseMission,
   CityLandmark,
   DifficultyLevel,
+  HistoricalEra,
   LiveSessionState,
+  MissionDifficulty,
   Player,
   QuizQuestion,
   SavedAtlasState,
   TurnPhase,
   WitnessClue,
 } from './types/game';
-import {
-  playCardFlip,
-  playClick,
-  playCrewHuddle,
-  playDiscoveryFanfare,
-  playFly,
-  playGentleNudge,
-  playLandingChime,
-  speakText,
-  stopSpeaking,
-} from './utils/audio';
 import {
   createCaseMission,
   createPlayer,
@@ -110,11 +101,14 @@ export function App() {
   const [activeSpotId, setActiveSpotId] = useState<string | null>(null);
   const [lastVisitedSpotId, setLastVisitedSpotId] = useState<string | null>(null);
   const [activeQuestion, setActiveQuestion] = useState<QuizQuestion | null>(null);
+  const [selectedChoiceIndex, setSelectedChoiceIndex] = useState<number | null>(null);
+  const [selectedEra, setSelectedEra] = useState<HistoricalEra>('modern');
   const [latestWitnessClue, setLatestWitnessClue] = useState<WitnessClue | null>(null);
   const [flyingFromId, setFlyingFromId] = useState<string | null>(null);
   const [flyingToId, setFlyingToId] = useState<string | null>(null);
   const [flightDurationMs, setFlightDurationMs] = useState<number>(6500);
   const [flyingIsReturn, setFlyingIsReturn] = useState(false);
+  const [flyingTargetEra, setFlyingTargetEra] = useState<HistoricalEra>('modern');
   const [activeLevel, setActiveLevel] = useState<DifficultyLevel>('explorer');
   const [crewHelped, setCrewHelped] = useState(false);
   const [triedChoiceIndices, setTriedChoiceIndices] = useState<number[]>([]);
@@ -133,7 +127,6 @@ export function App() {
   const tvHandleRef = useRef<TabletControllerHandle | null>(null);
   const flyTimerRef = useRef<number | null>(null);
 
-  // Persist family state whenever it updates
   useEffect(() => {
     persistState(savedState);
   }, [savedState]);
@@ -144,8 +137,6 @@ export function App() {
       tvHandleRef.current?.disconnect();
     };
   }, []);
-
-  const soundOn = savedState.preferences.soundEnabled;
 
   const activeMission: CaseMission | null = useMemo(
     () => savedState.missions.find((m) => m.id === savedState.activeMissionId) ?? null,
@@ -182,6 +173,8 @@ export function App() {
       activeSpotId,
       lastVisitedSpotId,
       activeQuestion,
+      selectedChoiceIndex,
+      selectedEra,
       latestWitnessClue,
       flyingFromId,
       flyingToId,
@@ -206,6 +199,8 @@ export function App() {
       activeSpotId,
       lastVisitedSpotId,
       activeQuestion,
+      selectedChoiceIndex,
+      selectedEra,
       latestWitnessClue,
       flyingFromId,
       flyingToId,
@@ -232,34 +227,30 @@ export function App() {
     }
   }, [tvConnectedCode, tabletHostCode, liveSessionState]);
 
-  const handleConnectToTv = useCallback(
-    (code: string) => {
-      const clean = normalizeRoomCode(code);
-      if (clean.length !== 4) return;
-      tvHandleRef.current?.disconnect();
-      setTabletHostCode(null);
-      setTvConnecting(true);
-      setTvError(null);
+  const handleConnectToTv = useCallback((code: string) => {
+    const clean = normalizeRoomCode(code);
+    if (clean.length !== 4) return;
+    tvHandleRef.current?.disconnect();
+    setTabletHostCode(null);
+    setTvConnecting(true);
+    setTvError(null);
 
-      const handle = connectTabletToTv(clean, {
-        onConnected: () => {
-          setTvConnecting(false);
-          setTvConnectedCode(clean);
-          setTvModalOpen(false);
-          setTvError(null);
-          handle.sendState(liveSessionStateRef.current);
-          playDiscoveryFanfare(soundOn);
-        },
-        onDisconnected: () => setTvConnectedCode(null),
-        onError: (msg) => {
-          setTvConnecting(false);
-          setTvError(msg);
-        },
-      });
-      tvHandleRef.current = handle;
-    },
-    [soundOn]
-  );
+    const handle = connectTabletToTv(clean, {
+      onConnected: () => {
+        setTvConnecting(false);
+        setTvConnectedCode(clean);
+        setTvModalOpen(false);
+        setTvError(null);
+        handle.sendState(liveSessionStateRef.current);
+      },
+      onDisconnected: () => setTvConnectedCode(null),
+      onError: (msg) => {
+        setTvConnecting(false);
+        setTvError(msg);
+      },
+    });
+    tvHandleRef.current = handle;
+  }, []);
 
   const startHostingFromTablet = useCallback(() => {
     const freshCode = generateRoomCode();
@@ -279,13 +270,12 @@ export function App() {
         setTvModalOpen(false);
         setTvError(null);
         handle.sendState(liveSessionStateRef.current);
-        playDiscoveryFanfare(soundOn);
       },
       onTvDisconnected: () => setTvConnectedCode(null),
       onError: (msg) => setTvError(msg),
     });
     tvHandleRef.current = handle;
-  }, [soundOn]);
+  }, []);
 
   const handleStopTabletHost = useCallback(() => {
     tvHandleRef.current?.disconnect();
@@ -303,8 +293,6 @@ export function App() {
 
   // Open or Resume a Mystery Case
   const openMission = (mission: CaseMission) => {
-    stopSpeaking();
-    playClick(soundOn);
     const pilotId =
       mission.playerIds[mission.currentTurnIndex % mission.playerIds.length];
     const pilot =
@@ -322,6 +310,8 @@ export function App() {
     setActiveSpotId(null);
     setLastVisitedSpotId(null);
     setActiveQuestion(null);
+    setSelectedChoiceIndex(null);
+    setSelectedEra(mission.currentEra ?? 'modern');
     setLatestWitnessClue(null);
     setFlyingFromId(null);
     setFlyingToId(null);
@@ -335,6 +325,8 @@ export function App() {
 
     if (mission.status !== 'active') {
       setTurnPhase('case-complete');
+    } else if (mission.isOnWrongEra) {
+      setTurnPhase('time-slip');
     } else if (mission.isOnColdTrail) {
       setTurnPhase('cold-trail');
     } else {
@@ -345,7 +337,7 @@ export function App() {
 
   const handleCreateMission = (params: {
     title?: string;
-    kind: CaseKind | 'random';
+    missionDifficulty: MissionDifficulty;
     stopsCount: number;
     playerIds: string[];
   }) => {
@@ -367,6 +359,8 @@ export function App() {
     setActiveSpotId(null);
     setLastVisitedSpotId(null);
     setActiveQuestion(null);
+    setSelectedChoiceIndex(null);
+    setSelectedEra(mission.currentEra ?? 'modern');
     setLatestWitnessClue(null);
     setFlyingFromId(null);
     setFlyingToId(null);
@@ -379,11 +373,9 @@ export function App() {
     setWarrantFeedback(null);
     setTurnPhase('town-hub');
     setScreen('expedition');
-    playFly(soundOn);
   };
 
   const handleDeleteMission = (missionId: string) => {
-    playClick(soundOn);
     setSavedState((prev) => ({
       ...prev,
       missions: prev.missions.filter((m) => m.id !== missionId),
@@ -397,7 +389,6 @@ export function App() {
     avatar: AvatarId;
     defaultLevel: DifficultyLevel;
   }) => {
-    playClick(soundOn);
     if (editingPlayer === 'new') {
       const added = createPlayer(data.name, data.avatar, data.defaultLevel);
       setSavedState((prev) => ({ ...prev, players: [...prev.players, added] }));
@@ -415,7 +406,6 @@ export function App() {
   const handleDeletePlayer = () => {
     if (!editingPlayer || editingPlayer === 'new') return;
     if (savedState.players.length <= 1) return;
-    playClick(soundOn);
     const removeId = editingPlayer.id;
     setSavedState((prev) => {
       const nextPlayers = prev.players.filter((p) => p.id !== removeId);
@@ -435,13 +425,11 @@ export function App() {
   };
 
   // =========================================================================
-  // GAMEPLAY HANDLERS (TOWN HUB -> SPOT CHALLENGE -> DEPARTURE -> FLIGHT -> FINALE)
+  // GAMEPLAY HANDLERS (TOWN HUB -> 2-STEP CHALLENGE -> DEPARTURE -> FLIGHT -> FINALE)
   // =========================================================================
 
   const handleSelectSpot = (spot: CityLandmark) => {
     if (!activeMission || turnPhase !== 'town-hub') return;
-    stopSpeaking();
-    playClick(soundOn);
     const q = selectSpotQuestion({
       destId: activeMission.currentDestId,
       level: activeLevel,
@@ -451,18 +439,15 @@ export function App() {
     setActiveSpotId(spot.id);
     setLastVisitedSpotId(spot.id);
     setActiveQuestion(q);
+    setSelectedChoiceIndex(null);
     setLatestWitnessClue(null);
     setCrewHelped(false);
     setTriedChoiceIndices([]);
     setShowGentleHint(false);
     setTurnPhase('spot-challenge');
-    if (savedState.preferences.readAloudEnabled) {
-      speakText(q.prompt);
-    }
   };
 
   const handleChangeLevel = (level: DifficultyLevel) => {
-    playClick(soundOn);
     setActiveLevel(level);
     if (turnPhase === 'spot-challenge' && activeMission && activeSpotId) {
       const layout = getCityLayout(activeMission.currentDestId);
@@ -476,20 +461,32 @@ export function App() {
         seenQuestionIds: savedState.seenQuestionIds,
       });
       setActiveQuestion(q);
+      setSelectedChoiceIndex(null);
       setTriedChoiceIndices([]);
       setShowGentleHint(false);
     }
   };
 
-  const handlePickAnswer = (choiceIdx: number) => {
-    if (!activeMission || !activeQuestion || !activeSpotId || turnPhase !== 'spot-challenge') {
+  const handleSelectChoice = (choiceIdx: number) => {
+    if (triedChoiceIndices.includes(choiceIdx)) return;
+    setSelectedChoiceIndex(choiceIdx);
+  };
+
+  const handleConfirmAnswer = () => {
+    if (
+      !activeMission ||
+      !activeQuestion ||
+      !activeSpotId ||
+      selectedChoiceIndex === null ||
+      turnPhase !== 'spot-challenge'
+    ) {
       return;
     }
 
-    if (choiceIdx === activeQuestion.correctIndex) {
-      stopSpeaking();
-      playDiscoveryFanfare(soundOn);
+    const choiceIdx = selectedChoiceIndex;
+    setSelectedChoiceIndex(null);
 
+    if (choiceIdx === activeQuestion.correctIndex) {
       const layout = getCityLayout(activeMission.currentDestId);
       const spot =
         layout.landmarks.find((s) => s.id === activeSpotId) ?? layout.landmarks[0];
@@ -500,15 +497,16 @@ export function App() {
         ? null
         : activeMission.trailDestIds[activeMission.trailProgressIndex + 1];
       const nextDest = nextDestId ? DESTINATIONS_BY_ID[nextDestId] ?? null : null;
+      const targetEra = isFinalStop
+        ? null
+        : activeMission.trailEras?.[activeMission.trailProgressIndex + 1] ?? null;
+
       const culprit = SUSPECTS_BY_ID[activeMission.culpritId];
       const spotsHere = activeMission.investigatedSpotsByCity[activeMission.currentDestId] ?? [];
       const traitsFound = Object.keys(activeMission.discoveredSuspectTraits).length;
-
-      // Drop a Suspect Trait on the first spot of each city (or any spot on the final city if < 4 traits found)
       const shouldDropTrait =
         traitsFound < 4 && (spotsHere.length === 0 || isFinalStop);
 
-      // Shared witness clues automatically simplify wording for the LOWEST-level crew member!
       const clueLevel = getLowestCrewLevel(missionPlayers);
 
       const witnessClue = generateWitnessClue({
@@ -516,6 +514,8 @@ export function App() {
         nextDest,
         culprit,
         caseKind: activeMission.kind,
+        missionDifficulty: activeMission.missionDifficulty,
+        targetEra,
         clueLevel,
         discoveredTraits: activeMission.discoveredSuspectTraits,
         dropSuspectTrait: shouldDropTrait,
@@ -551,7 +551,9 @@ export function App() {
                 spotId: activeSpotId,
                 spotTitle: witnessClue.spotTitle,
                 witnessName: witnessClue.witnessName,
+                icon: witnessClue.icon,
                 destinationClue: witnessClue.destinationClue,
+                eraClue: witnessClue.eraClue,
                 suspectClue: witnessClue.suspectClue,
               },
             ],
@@ -573,7 +575,6 @@ export function App() {
       setActiveSpotId(null);
       setTurnPhase(outOfTime ? 'case-complete' : 'town-hub');
     } else {
-      playGentleNudge(soundOn);
       setTriedChoiceIndices((prev) =>
         prev.includes(choiceIdx) ? prev : [...prev, choiceIdx]
       );
@@ -583,10 +584,8 @@ export function App() {
 
   const handleDismissWitnessClue = () => {
     if (!activeMission) return;
-    playClick(soundOn);
     setLatestWitnessClue(null);
 
-    // Advance relay turn to the next family member in town!
     const nextIdx =
       (activeMission.currentTurnIndex + 1) % activeMission.playerIds.length;
     const nextPilotId = activeMission.playerIds[nextIdx];
@@ -604,8 +603,73 @@ export function App() {
     setActiveLevel(nextPilot.defaultLevel);
   };
 
+  // Shared helper for advancing to a verified next city (+ era in Time-Warp!)
+  const advanceHotTrailArrival = useCallback(
+    (targetDestId: string, nextHours: number, landedEra?: HistoricalEra) => {
+      if (!activeMission) return;
+      const nextProgress = activeMission.trailProgressIndex + 1;
+      const isFinal = nextProgress >= activeMission.trailDestIds.length - 1;
+      const nextHopTarget = isFinal
+        ? targetDestId
+        : activeMission.trailDestIds[nextProgress + 1];
+      const nextVisited = activeMission.visitedDestIds.includes(targetDestId)
+        ? activeMission.visitedDestIds
+        : [...activeMission.visitedDestIds, targetDestId];
+      const nextBoard = isFinal
+        ? []
+        : buildDepartureBoard(
+            targetDestId,
+            nextHopTarget,
+            nextVisited,
+            activeMission.missionDifficulty
+          );
+
+      const isNewDiscovery = !savedState.discoveredDestIds.includes(targetDestId);
+      setCelebratingNewDiscovery(isNewDiscovery);
+      setPostcardDestId(targetDestId);
+      setPostcardFlipped(false);
+      setLatestWitnessClue(null);
+      setLastVisitedSpotId(null);
+
+      const nextTurnIdx =
+        (activeMission.currentTurnIndex + 1) % activeMission.playerIds.length;
+      const nextPilot =
+        savedState.players.find(
+          (p) => p.id === activeMission.playerIds[nextTurnIdx]
+        ) ?? savedState.players[0];
+      setActiveLevel(nextPilot.defaultLevel);
+
+      setSavedState((prev) => ({
+        ...prev,
+        discoveredDestIds: isNewDiscovery
+          ? [...prev.discoveredDestIds, targetDestId]
+          : prev.discoveredDestIds,
+        missions: prev.missions.map((m) =>
+          m.id === activeMission.id
+            ? {
+                ...m,
+                currentDestId: targetDestId,
+                currentEra: landedEra ?? m.currentEra,
+                lastValidDestId: targetDestId,
+                isOnColdTrail: false,
+                isOnWrongEra: false,
+                trailProgressIndex: nextProgress,
+                departureOptions: nextBoard,
+                visitedDestIds: nextVisited,
+                currentTurnIndex: nextTurnIdx,
+                hoursElapsed: nextHours,
+                updatedAt: Date.now(),
+              }
+            : m
+        ),
+      }));
+      setTurnPhase('postcard');
+    },
+    [activeMission, savedState.discoveredDestIds, savedState.players]
+  );
+
   const completeFlightLanding = useCallback(
-    (targetDestId: string, isReturnFlight: boolean) => {
+    (targetDestId: string, isReturnFlight: boolean, chosenEra: HistoricalEra) => {
       if (flyTimerRef.current) {
         window.clearTimeout(flyTimerRef.current);
         flyTimerRef.current = null;
@@ -624,7 +688,6 @@ export function App() {
       }
 
       if (outOfTime) {
-        playGentleNudge(soundOn);
         setSavedState((prev) => ({
           ...prev,
           missions: prev.missions.map((m) =>
@@ -643,9 +706,7 @@ export function App() {
         return;
       }
 
-      // Return flight back to last valid trail city
       if (isReturnFlight) {
-        playLandingChime(soundOn);
         setLastVisitedSpotId(null);
         setSavedState((prev) => ({
           ...prev,
@@ -655,6 +716,7 @@ export function App() {
                   ...m,
                   currentDestId: targetDestId,
                   isOnColdTrail: false,
+                  isOnWrongEra: false,
                   visitedDestIds: [...m.visitedDestIds, targetDestId],
                   hoursElapsed: nextHours,
                   updatedAt: Date.now(),
@@ -666,64 +728,44 @@ export function App() {
         return;
       }
 
-      // Check if they deduced the TRUE next destination along the trail!
       const expectedNextId =
         activeMission.trailDestIds[activeMission.trailProgressIndex + 1];
-      const isCorrectTrail = targetDestId === expectedNextId;
+      const isCorrectCity = targetDestId === expectedNextId;
 
-      if (isCorrectTrail) {
-        playDiscoveryFanfare(soundOn);
-        const nextProgress = activeMission.trailProgressIndex + 1;
-        const isFinal = nextProgress >= activeMission.trailDestIds.length - 1;
-        const nextHopTarget = isFinal
-          ? targetDestId
-          : activeMission.trailDestIds[nextProgress + 1];
-        const nextVisited = [...activeMission.visitedDestIds, targetDestId];
-        const nextBoard = isFinal
-          ? []
-          : buildDepartureBoard(targetDestId, nextHopTarget, nextVisited);
+      if (isCorrectCity) {
+        // Level 4 Time-Warp check: did they ALSO dial the right Historical Era?
+        const expectedEra =
+          activeMission.missionDifficulty === 'time-warp'
+            ? activeMission.trailEras?.[activeMission.trailProgressIndex + 1]
+            : undefined;
 
-        const isNewDiscovery = !savedState.discoveredDestIds.includes(targetDestId);
-        setCelebratingNewDiscovery(isNewDiscovery);
-        setPostcardDestId(targetDestId);
-        setPostcardFlipped(false);
-        setLatestWitnessClue(null);
-        setLastVisitedSpotId(null);
+        if (expectedEra && chosenEra !== expectedEra) {
+          setLastVisitedSpotId(null);
+          setSelectedEra(chosenEra);
+          setSavedState((prev) => ({
+            ...prev,
+            missions: prev.missions.map((m) =>
+              m.id === activeMission.id
+                ? {
+                    ...m,
+                    currentDestId: targetDestId,
+                    isOnColdTrail: false,
+                    isOnWrongEra: true,
+                    visitedDestIds: [...m.visitedDestIds, targetDestId],
+                    hoursElapsed: nextHours,
+                    wrongFlightsCount: m.wrongFlightsCount + 1,
+                    updatedAt: Date.now(),
+                  }
+                : m
+            ),
+          }));
+          setTurnPhase('time-slip');
+          return;
+        }
 
-        const nextTurnIdx =
-          (activeMission.currentTurnIndex + 1) % activeMission.playerIds.length;
-        const nextPilot =
-          savedState.players.find(
-            (p) => p.id === activeMission.playerIds[nextTurnIdx]
-          ) ?? savedState.players[0];
-        setActiveLevel(nextPilot.defaultLevel);
-
-        setSavedState((prev) => ({
-          ...prev,
-          discoveredDestIds: isNewDiscovery
-            ? [...prev.discoveredDestIds, targetDestId]
-            : prev.discoveredDestIds,
-          missions: prev.missions.map((m) =>
-            m.id === activeMission.id
-              ? {
-                  ...m,
-                  currentDestId: targetDestId,
-                  lastValidDestId: targetDestId,
-                  isOnColdTrail: false,
-                  trailProgressIndex: nextProgress,
-                  departureOptions: nextBoard,
-                  visitedDestIds: nextVisited,
-                  currentTurnIndex: nextTurnIdx,
-                  hoursElapsed: nextHours,
-                  updatedAt: Date.now(),
-                }
-              : m
-          ),
-        }));
-        setTurnPhase('postcard');
+        advanceHotTrailArrival(targetDestId, nextHours, expectedEra);
       } else {
         // COLD TRAIL DRAMA!
-        playGentleNudge(soundOn);
         const isNewDiscovery = !savedState.discoveredDestIds.includes(targetDestId);
         setLastVisitedSpotId(null);
         setSavedState((prev) => ({
@@ -737,6 +779,7 @@ export function App() {
                   ...m,
                   currentDestId: targetDestId,
                   isOnColdTrail: true,
+                  isOnWrongEra: false,
                   visitedDestIds: [...m.visitedDestIds, targetDestId],
                   hoursElapsed: nextHours,
                   wrongFlightsCount: m.wrongFlightsCount + 1,
@@ -748,19 +791,59 @@ export function App() {
         setTurnPhase('cold-trail');
       }
     },
-    [activeMission, flyingFromId, savedState.discoveredDestIds, savedState.players, soundOn]
+    [activeMission, flyingFromId, savedState.discoveredDestIds, advanceHotTrailArrival]
   );
+
+  const handleJumpEraInCity = (era: HistoricalEra) => {
+    if (!activeMission || turnPhase !== 'time-slip') return;
+    const nextHours = activeMission.hoursElapsed + 6;
+    const outOfTime = nextHours >= activeMission.totalHoursBudget;
+
+    if (outOfTime) {
+      setSavedState((prev) => ({
+        ...prev,
+        missions: prev.missions.map((m) =>
+          m.id === activeMission.id
+            ? { ...m, hoursElapsed: nextHours, status: 'escaped', updatedAt: Date.now() }
+            : m
+        ),
+      }));
+      setTurnPhase('case-complete');
+      return;
+    }
+
+    const expectedEra = activeMission.trailEras?.[activeMission.trailProgressIndex + 1];
+    setSelectedEra(era);
+
+    if (!expectedEra || era === expectedEra) {
+      advanceHotTrailArrival(activeMission.currentDestId, nextHours, era);
+    } else {
+      setSavedState((prev) => ({
+        ...prev,
+        missions: prev.missions.map((m) =>
+          m.id === activeMission.id
+            ? {
+                ...m,
+                hoursElapsed: nextHours,
+                wrongFlightsCount: m.wrongFlightsCount + 1,
+                updatedAt: Date.now(),
+              }
+            : m
+        ),
+      }));
+    }
+  };
 
   const launchFlight = (targetDestId: string, isReturnFlight = false) => {
     if (!activeMission) return;
-    stopSpeaking();
-    playFly(soundOn);
     const fromId = activeMission.currentDestId;
     const durationMs = computeFlightAnimationMs(fromId, targetDestId);
+    const chosenEra = selectedEra;
     setFlyingFromId(fromId);
     setFlyingToId(targetDestId);
     setFlightDurationMs(durationMs);
     setFlyingIsReturn(isReturnFlight);
+    setFlyingTargetEra(chosenEra);
     setLatestWitnessClue(null);
     setTurnPhase('flying');
 
@@ -770,13 +853,13 @@ export function App() {
 
     if (flyTimerRef.current) window.clearTimeout(flyTimerRef.current);
     flyTimerRef.current = window.setTimeout(() => {
-      completeFlightLanding(targetDestId, isReturnFlight);
+      completeFlightLanding(targetDestId, isReturnFlight, chosenEra);
     }, durationMs);
   };
 
   const handleLandEarly = () => {
     if (turnPhase !== 'flying' || !flyingToId) return;
-    completeFlightLanding(flyingToId, flyingIsReturn);
+    completeFlightLanding(flyingToId, flyingIsReturn, flyingTargetEra);
   };
 
   const handleMarkHistoryFlipped = (destId: string) => {
@@ -788,7 +871,6 @@ export function App() {
   };
 
   const handleTogglePostcardFlip = () => {
-    playCardFlip(soundOn);
     setPostcardFlipped((prev) => {
       const next = !prev;
       if (next && postcardDestId) {
@@ -800,7 +882,6 @@ export function App() {
 
   const handleSelectWarrantSuspect = (suspectId: string) => {
     if (!activeMission) return;
-    playClick(soundOn);
     setWarrantFeedback(null);
     setSavedState((prev) => ({
       ...prev,
@@ -815,7 +896,6 @@ export function App() {
   const handleSubmitWarrant = () => {
     if (!activeMission || !activeMission.selectedWarrantSuspectId) return;
     if (activeMission.selectedWarrantSuspectId === activeMission.culpritId) {
-      playDiscoveryFanfare(soundOn);
       const medal =
         activeMission.wrongFlightsCount === 0
           ? 'gold'
@@ -834,7 +914,6 @@ export function App() {
       setWarrantFeedback(null);
       setTurnPhase('case-complete');
     } else {
-      playGentleNudge(soundOn);
       const nextHours = activeMission.hoursElapsed + 6;
       const outOfTime = nextHours >= activeMission.totalHoursBudget;
       setSavedState((prev) => ({
@@ -879,6 +958,8 @@ export function App() {
           activeSpotId={activeSpotId}
           lastVisitedSpotId={lastVisitedSpotId}
           activeQuestion={activeQuestion}
+          selectedChoiceIndex={selectedChoiceIndex}
+          selectedEra={selectedEra}
           latestWitnessClue={latestWitnessClue}
           flyingFromId={flyingFromId}
           flyingToId={flyingToId}
@@ -894,18 +975,14 @@ export function App() {
           tvConnectedCode={tvConnectedCode}
           onSelectSpot={handleSelectSpot}
           onChangeLevel={handleChangeLevel}
-          onPickAnswer={handlePickAnswer}
-          onAskCrew={() => {
-            playCrewHuddle(soundOn);
-            setCrewHelped(true);
-          }}
+          onSelectChoice={handleSelectChoice}
+          onConfirmAnswer={handleConfirmAnswer}
+          onSelectEra={setSelectedEra}
+          onJumpEraInCity={handleJumpEraInCity}
+          onAskCrew={() => setCrewHelped(true)}
           onDismissWitnessClue={handleDismissWitnessClue}
-          onOpenDepartureBoard={() => {
-            playClick(soundOn);
-            setTurnPhase('departure-board');
-          }}
+          onOpenDepartureBoard={() => setTurnPhase('departure-board')}
           onBackToTownHub={() => {
-            playClick(soundOn);
             setWarrantFeedback(null);
             setTurnPhase('town-hub');
           }}
@@ -913,40 +990,21 @@ export function App() {
           onLandEarly={handleLandEarly}
           onFlyBackToLastValid={() => launchFlight(activeMission.lastValidDestId, true)}
           onTogglePostcardFlip={handleTogglePostcardFlip}
-          onFinishPostcard={() => {
-            playClick(soundOn);
-            setTurnPhase('town-hub');
-          }}
+          onFinishPostcard={() => setTurnPhase('town-hub')}
           onOpenFinaleWarrant={() => {
-            playClick(soundOn);
             setWarrantFeedback(null);
             setTurnPhase('finale-warrant');
           }}
           onSelectWarrantSuspect={handleSelectWarrantSuspect}
           onSubmitWarrant={handleSubmitWarrant}
-          onReadAloud={speakText}
           onOpenFieldGuide={(compareIds) => {
-            playClick(soundOn);
             setFieldGuideCompareIds(compareIds ?? []);
             setFieldGuideOpen(true);
           }}
-          onOpenNotebook={() => {
-            playClick(soundOn);
-            setNotebookOpen(true);
-          }}
-          onOpenPassport={() => {
-            playClick(soundOn);
-            setPassportOpen(true);
-          }}
-          onStartNewCase={() => {
-            playClick(soundOn);
-            setNewMissionOpen(true);
-          }}
-          onExitHome={() => {
-            stopSpeaking();
-            playClick(soundOn);
-            setScreen('home');
-          }}
+          onOpenNotebook={() => setNotebookOpen(true)}
+          onOpenPassport={() => setPassportOpen(true)}
+          onStartNewCase={() => setNewMissionOpen(true)}
+          onExitHome={() => setScreen('home')}
         />
 
         {fieldGuideOpen && (
@@ -969,7 +1027,6 @@ export function App() {
             discoveredDestIds={savedState.discoveredDestIds}
             flippedHistoryIds={savedState.flippedHistoryIds}
             onFlipHistory={handleMarkHistoryFlipped}
-            onReadAloud={speakText}
             onHighlightDest={setPassportHighlightId}
             onClose={() => {
               setPassportHighlightId(null);
@@ -1008,7 +1065,7 @@ export function App() {
             <div>
               <h1 className="brand-title">Wanderbook Atlas</h1>
               <p className="brand-subtitle">
-                {DESTINATIONS.length} World Cities • 1,050 Real Landmarks • City Orientation Maps & Time-Flip Postcards
+                {DESTINATIONS.length} World & US Cities (All 50 States!) • 1,235 Real Landmarks • 4-Level Detective Chase
               </p>
             </div>
           </div>
@@ -1018,7 +1075,6 @@ export function App() {
               type="button"
               className="btn btn-sage btn-sm"
               onClick={() => {
-                playClick(soundOn);
                 setFieldGuideCompareIds([]);
                 setFieldGuideOpen(true);
               }}
@@ -1028,22 +1084,16 @@ export function App() {
             <button
               type="button"
               className="btn btn-ochre btn-sm"
-              onClick={() => {
-                playClick(soundOn);
-                setPassportOpen(true);
-              }}
+              onClick={() => setPassportOpen(true)}
             >
               <Award size={17} /> Passport ({savedState.discoveredDestIds.length}/{DESTINATIONS.length})
             </button>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              onClick={() => {
-                playClick(soundOn);
-                setSettingsOpen(true);
-              }}
+              onClick={() => setSettingsOpen(true)}
             >
-              <Settings size={17} /> Preferences
+              <Settings size={17} /> Save & TV Tips
             </button>
           </div>
         </header>
@@ -1060,10 +1110,7 @@ export function App() {
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={() => {
-                    playClick(soundOn);
-                    setEditingPlayer('new');
-                  }}
+                  onClick={() => setEditingPlayer('new')}
                 >
                   <Plus size={16} /> Add Explorer
                 </button>
@@ -1075,10 +1122,7 @@ export function App() {
                     key={p.id}
                     type="button"
                     className="crew-card"
-                    onClick={() => {
-                      playClick(soundOn);
-                      setEditingPlayer(p);
-                    }}
+                    onClick={() => setEditingPlayer(p)}
                   >
                     <AnimalAvatar avatar={p.avatar} size={46} />
                     <div style={{ textAlign: 'left' }}>
@@ -1100,7 +1144,7 @@ export function App() {
                 ))}
               </div>
               <p style={{ fontSize: '0.84rem', color: 'var(--ink-muted)', fontWeight: 600, marginTop: 12 }}>
-                Tap any explorer to edit their name, animal companion, or opt-in tier (from Ages 6–8 up to Tough Adult Master Scholar!).
+                Tap any explorer to customize their name, companion, and personal question difficulty tier.
               </p>
             </section>
 
@@ -1108,15 +1152,12 @@ export function App() {
             <section className="paper-panel section-card" aria-label="Mystery Case Files">
               <div className="section-header">
                 <h2 className="section-title">
-                  <ShieldCheck size={22} color="var(--terracotta)" /> Active Mystery Cases
+                  <ShieldCheck size={22} color="var(--terracotta)" /> Active Detective Cases
                 </h2>
                 <button
                   type="button"
                   className="btn btn-terracotta btn-sm"
-                  onClick={() => {
-                    playClick(soundOn);
-                    setNewMissionOpen(true);
-                  }}
+                  onClick={() => setNewMissionOpen(true)}
                 >
                   <Plus size={16} /> Open New Case
                 </button>
@@ -1136,21 +1177,18 @@ export function App() {
                   }}
                 >
                   <BalloonEmblem size={54} />
-                  <h3 style={{ fontSize: '1.38rem' }}>Your First World Mystery Awaits!</h3>
+                  <h3 style={{ fontSize: '1.38rem' }}>Your First Detective Chase Awaits!</h3>
                   <p style={{ color: 'var(--ink-soft)', maxWidth: 460, lineHeight: 1.5, fontWeight: 600 }}>
-                    Investigate 5 unique real landmarks in every city across {DESTINATIONS.length} global
-                    destinations, consult your always-free Atlas Field Guide, and crack the Suspect
-                    Warrant before the Travel Clock runs dry!
+                    Choose your Mission Scope—from <strong>Across the USA (All 50 States)</strong> to{' '}
+                    <strong>Iconic World</strong>, <strong>Full World ({DESTINATIONS.length} Cities)</strong>, or{' '}
+                    <strong>Time-Warp Chase</strong> across historical eras!
                   </p>
                   <button
                     type="button"
                     className="btn btn-terracotta btn-lg"
-                    onClick={() => {
-                      playClick(soundOn);
-                      setNewMissionOpen(true);
-                    }}
+                    onClick={() => setNewMissionOpen(true)}
                   >
-                    <Play size={19} /> Launch Mystery Case
+                    <Play size={19} /> Launch Detective Case
                   </button>
                 </div>
               ) : (
@@ -1168,12 +1206,16 @@ export function App() {
                     const pilot =
                       savedState.players.find((p) => p.id === pilotId) ??
                       savedState.players[0];
+                    const diffLabel =
+                      MISSION_DIFFICULTY_INFO[mission.missionDifficulty]?.shortLabel ??
+                      'World';
 
                     return (
                       <div key={mission.id} className="mission-slot">
                         <div className="mission-slot-meta">
                           <div className="mission-slot-title">
                             <span>{mission.title}</span>
+                            <span className="level-pill navigator">{diffLabel}</span>
                             {mission.status === 'won' && (
                               <span className="level-pill explorer">
                                 Solved ({mission.medal?.toUpperCase()})
@@ -1185,9 +1227,12 @@ export function App() {
                             {mission.isOnColdTrail && mission.status === 'active' && (
                               <span className="level-pill scholar">Cold Trail!</span>
                             )}
+                            {mission.isOnWrongEra && mission.status === 'active' && (
+                              <span className="level-pill cartographer">Time Slip!</span>
+                            )}
                           </div>
                           <div className="mission-slot-sub">
-                            City {mission.trailProgressIndex + 1}/{mission.trailDestIds.length} •{' '}
+                            Stop {mission.trailProgressIndex + 1}/{mission.trailDestIds.length} •{' '}
                             In <strong>{currentDest?.name ?? 'Earth'}</strong> •{' '}
                             <Clock size={12} style={{ verticalAlign: 'middle' }} />{' '}
                             {clk.daysRemainingText} • Up next: <strong>{pilot?.name}</strong>
@@ -1255,7 +1300,6 @@ export function App() {
                     type="button"
                     className="btn btn-ochre"
                     onClick={() => {
-                      playClick(soundOn);
                       setTvError(null);
                       setTvModalOpen(true);
                     }}
@@ -1268,10 +1312,7 @@ export function App() {
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
-                    onClick={() => {
-                      playClick(soundOn);
-                      setIsTvDisplayMode(true);
-                    }}
+                    onClick={() => setIsTvDisplayMode(true)}
                   >
                     Open TV Big Screen on This Device
                   </button>
@@ -1288,10 +1329,7 @@ export function App() {
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={() => {
-                    playClick(soundOn);
-                    setPassportOpen(true);
-                  }}
+                  onClick={() => setPassportOpen(true)}
                 >
                   Open Book
                 </button>
@@ -1321,12 +1359,12 @@ export function App() {
                     {recentDiscovered.map((dest) => (
                       <div
                         key={dest.id}
-                        title={`${dest.souvenirName} (${dest.country})`}
+                        title={`${dest.souvenirName} (${dest.name})`}
                         style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
                       >
                         <SouvenirArt id={dest.souvenirId} size={46} />
                         <span style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--ink-soft)' }}>
-                          {dest.country}
+                          {dest.name}
                         </span>
                       </div>
                     ))}
@@ -1334,8 +1372,8 @@ export function App() {
                 </div>
               ) : (
                 <p style={{ fontSize: '0.86rem', color: 'var(--ink-soft)', marginTop: 12, lineHeight: 1.45, fontWeight: 600 }}>
-                  Explore {DESTINATIONS.length} real world destinations, solve rotating mystery cases, and
-                  collect every Time-Flip Postcard and Souvenir!
+                  Explore all 50 US states and {DESTINATIONS.length} total destinations, solve mystery
+                  chases, and collect every Time-Flip Postcard and Souvenir!
                 </p>
               )}
             </section>
@@ -1374,7 +1412,6 @@ export function App() {
           discoveredDestIds={savedState.discoveredDestIds}
           flippedHistoryIds={savedState.flippedHistoryIds}
           onFlipHistory={handleMarkHistoryFlipped}
-          onReadAloud={speakText}
           onHighlightDest={setPassportHighlightId}
           onClose={() => {
             setPassportHighlightId(null);
@@ -1386,9 +1423,6 @@ export function App() {
       {settingsOpen && (
         <SettingsModal
           state={savedState}
-          onUpdatePrefs={(preferences) =>
-            setSavedState((prev) => ({ ...prev, preferences }))
-          }
           onImportState={(next) => setSavedState(next)}
           onClose={() => setSettingsOpen(false)}
         />

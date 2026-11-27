@@ -2,6 +2,7 @@ import type {
   AvatarId,
   ContinentName,
   Destination,
+  HistoricalMilestone,
   SceneType,
   SouvenirIconId,
 } from '../../types/game';
@@ -33,8 +34,9 @@ export interface CompactCitySpec {
   souvenirCategory: 'wildlife' | 'artifact';
   routeLabel: string;
   todayFact: string;
-  h1: [string, string, string];
-  h2: [string, string, string];
+  h1?: [string, string, string];
+  h2?: [string, string, string];
+  history?: [HistoricalMilestone, HistoricalMilestone];
   sceneType: SceneType;
   skyTop?: string;
   skyBottom?: string;
@@ -52,6 +54,10 @@ export function buildDestinations(specs: CompactCitySpec[]): Destination[] {
     const [, lat] = s.coords;
     const hemisphere: Destination['hemisphere'] =
       Math.abs(lat) <= 4 ? 'Equatorial' : lat > 0 ? 'Northern' : 'Southern';
+    const history: [HistoricalMilestone, HistoricalMilestone] = s.history ?? [
+      { era: s.h1![0], title: s.h1![1], fact: s.h1![2] },
+      { era: s.h2![0], title: s.h2![1], fact: s.h2![2] },
+    ];
     return {
       id: s.id,
       name: s.name,
@@ -81,10 +87,7 @@ export function buildDestinations(specs: CompactCitySpec[]): Destination[] {
       souvenirCategory: s.souvenirCategory,
       routeLabel: s.routeLabel,
       todayFact: s.todayFact,
-      history: [
-        { era: s.h1[0], title: s.h1[1], fact: s.h1[2] },
-        { era: s.h2[0], title: s.h2[1], fact: s.h2[2] },
-      ],
+      history,
       sceneType: s.sceneType,
       skyTop: s.skyTop ?? '#5c8fab',
       skyBottom: s.skyBottom ?? '#f0e2c6',

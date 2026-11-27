@@ -3,12 +3,14 @@ import { AFRICA_LANDMARKS } from './africaLandmarks';
 import { AMERICAS_OCEANIA_LANDMARKS } from './americasOceaniaLandmarks';
 import { ASIA_LANDMARKS } from './asiaLandmarks';
 import { EUROPE_LANDMARKS } from './europeLandmarks';
+import { US_STATE_LANDMARKS } from './usStatesLandmarks';
 
 export const CITY_LAYOUTS: Record<string, CityLayout> = {
   ...EUROPE_LANDMARKS,
   ...AFRICA_LANDMARKS,
   ...ASIA_LANDMARKS,
   ...AMERICAS_OCEANIA_LANDMARKS,
+  ...US_STATE_LANDMARKS,
 };
 
 export function getCityLayout(destId: string): CityLayout {
